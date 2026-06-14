@@ -1,0 +1,76 @@
+{
+  "name": "@state-flow/core",
+  "version": "1.0.0",
+  "description": "Type-safe, immutable state management built on signals, flows, and frozen state snapshots.",
+  "license": "MIT",
+  "author": "Ilya Pirogov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ilya-pirogov/stateflow.git"
+  },
+  "homepage": "https://stateflow.dev",
+  "bugs": {
+    "url": "https://github.com/ilya-pirogov/stateflow/issues"
+  },
+  "keywords": [
+    "state-management",
+    "state-machine",
+    "finite-state-machine",
+    "fsm",
+    "immutable",
+    "signals",
+    "typescript",
+    "type-safe"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "source": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run build:json && tsup && tsc -p tsconfig.dts.json && rimraf dist/examples.d.ts dist/examples.d.ts.map dist/logger-mock.d.ts dist/logger-mock.d.ts.map",
+    "build:json": "HASH=$(git rev-parse HEAD 2>/dev/null || echo \"\") && BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"\") && echo 'export default { name: \"'${npm_package_name}'\", version: \"'${npm_package_version}'\", commit: \"'${HASH}'\", branch: \"'${BRANCH}'\" };' > src/package-json.ts",
+    "watch": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "events": "^3.3.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@types/node": "^22.19.21",
+    "@vitest/coverage-v8": "^2.1.9",
+    "rimraf": "~3.0.2",
+    "tsup": "^8.0.0",
+    "typescript": "6.0.3",
+    "vitest": "^2.1.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

@@ -1,0 +1,52 @@
+{
+	"name": "stateflow-docs",
+	"version": "0.1.0",
+	"private": true,
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ilya-pirogov/stateflow"
+	},
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "next lint",
+		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts"
+	},
+	"dependencies": {
+		"@algolia/autocomplete-core": "^1.9.2",
+		"@headlessui/react": "^2.1.0",
+		"@markdoc/markdoc": "^0.4.0",
+		"@markdoc/next.js": "^0.3.4",
+		"@opennextjs/cloudflare": "^1.3.0",
+		"@sindresorhus/slugify": "^2.1.0",
+		"@tailwindcss/typography": "^0.5.7",
+		"@types/react-highlight-words": "^0.16.4",
+		"clsx": "^2.1.0",
+		"fast-glob": "^3.2.12",
+		"flexsearch": "^0.7.31",
+		"js-yaml": "^4.1.0",
+		"next": "15.3.5",
+		"next-themes": "^0.2.1",
+		"prism-react-renderer": "^2.0.6",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"react-highlight-words": "^0.20.0",
+		"simple-functional-loader": "^1.2.1"
+	},
+	"devDependencies": {
+		"@next/react-refresh-utils": "^15.4.2",
+		"@tailwindcss/postcss": "^4",
+		"@types/node": "^24.0.15",
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"react-refresh": "^0.17.0",
+		"sharp": "0.33.1",
+		"tailwindcss": "^4",
+		"typescript": "^5",
+		"wrangler": "^4.25.0"
+	},
+	"packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}
