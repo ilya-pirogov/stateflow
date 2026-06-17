@@ -14,7 +14,7 @@ export {
 } from "./logger";
 export { Result, ResultCollector, ResultKind } from "./result";
 export { defineSignal, Signal, StateSignal } from "./signal";
-export { defineFlow, defineState, isState, StateResult, StateVariant, stateVar } from "./state";
+export { defineFlow, defineState, isState, StateDefinition, StateInstance, StateResult, StateVariant, stateVar } from "./state";
 export { PARSER, SIGNALS, STRING_REPR, VARIANT } from "./symbols";
 export { Infer, StateFlowError, serializeDebug } from "./utils";
 

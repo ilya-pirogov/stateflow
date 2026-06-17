@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-16
+
+### Fixed
+
+- Export the `StateDefinition` and `StateInstance` types from the public entry
+  point. They were already part of the public surface by inference —
+  `defineState().build()` returns a `StateDefinition`, and the exported
+  `StateResult` / `StateVariant` reference `StateInstance` — but were not
+  nameable, so consumers re-exporting those results in their own `.d.ts` hit
+  TypeScript's TS2883 portability error. Exposing them by name repairs the
+  declaration surface. No runtime or behavioral change.
+
 ## [1.0.0] - 2026-06-13
 
 ### Added
@@ -26,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stateVar`, and the public symbols `PARSER`, `SIGNALS`, `STRING_REPR`,
   `VARIANT`.
 
-[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/ilya-pirogov/stateflow/releases/tag/v1.0.0
