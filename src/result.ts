@@ -604,6 +604,15 @@ export class ResultCollector {
     }
   }
 
+  /**
+   * The stringified signal this collector was created for. Sourced from the
+   * signal passed to the constructor (already `String(signal)`), so no new
+   * parameter has to be threaded through the dispatch call sites.
+   */
+  get signal(): string {
+    return this.entry.signal;
+  }
+
   merge(): Result {
     if (this.results.length === 1 && this.results[0] != null) {
       return this.results[0];

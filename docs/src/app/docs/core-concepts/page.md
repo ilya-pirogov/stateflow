@@ -241,4 +241,14 @@ observe(
 subscription[Symbol.dispose]();
 ```
 
+To observe an entire flow at once — rather than a specific list of variants — use
+`subscribeFlow()`. It is observation-only (the subscriber cannot dispatch, enqueue, or mutate
+state) and delivers one `FlowChange` per changed state, post-commit, on its own macrotask:
+
+```typescript
+using sub = subscribeFlow(app, (change) => {
+  console.log(`${change.stateName}: ${change.prevVariant} -> ${change.nextVariant}`);
+});
+```
+
 These concepts work together to create a state management system that is predictable, debuggable, and type-safe, while providing explicit feedback for every operation.

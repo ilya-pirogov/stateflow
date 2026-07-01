@@ -357,6 +357,7 @@ There is a precise place for every kind of follow-up work:
 | Perform a side effect gated by the transition | `addEnter/Exit/Update` handler | after verification; can reject → rollback |
 | A small same-target follow-up **state change** | `Result.enqueue(sig)` | after commit (≤1 per dispatch *cycle*; co-enqueuing from multiple handlers only warns, it is not rejected) |
 | React read-only to a committed change | `observe()` | after commit |
+| Observe every change on a flow, decoupled from any one variant | `subscribeFlow()` | after commit, own macrotask per change |
 | A cross-target follow-up | `lock(otherTarget)` + `send` | sequenced |
 | Must-succeed-before-true async work | `Result.transition` | commit deferred until it resolves |
 

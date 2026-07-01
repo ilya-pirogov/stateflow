@@ -260,6 +260,48 @@ const sub = observe(app, [taskState.completed], logCompletion);
 sub[Symbol.dispose]();
 ```
 
+### subscribeFlow
+
+Subscribes to every committed (or rolled-back) state change on a flow, observation-only.
+
+```typescript
+function subscribeFlow(target: object, subscriber: FlowSubscriber): Disposer
+```
+
+Unlike `observe`, a `subscribeFlow` subscriber cannot influence the flow at all — it has no
+handle to dispatch, enqueue, or mutate state. It receives a plain `FlowChange` value (with the
+real, frozen `prev`/`next` state instances), delivered strictly after the state has committed,
+one change per macrotask, so nothing it does can reorder or block the dispatch. A throwing
+subscriber is isolated — it never affects the dispatch or other subscribers.
+
+```typescript
+interface FlowChange<T = unknown> {
+  flowName: string;       // the target's flow name
+  stateName: string;      // the state definition that changed, e.g. "playback"
+  prevVariant: string;    // variant name before the change, e.g. "paused"
+  nextVariant: string;    // variant name after the change, e.g. "playing"
+  prev: T;                // the real state instance before — frozen, props readable
+  next: T;                // the real state instance after — frozen, props readable
+  signal: string;         // stringified signal that drove the dispatch
+  kind: "commit" | "rollback";
+}
+
+type FlowSubscriber = (change: FlowChange) => void;
+```
+
+One `FlowChange` is delivered per state that actually changed in a dispatch: `kind` is
+`"commit"` on a forward apply and `"rollback"` when an enqueue-chain failure restores prior
+state. With no subscribers registered, dispatch is entirely unaffected and pays nothing.
+
+Example:
+
+```typescript
+using sub = subscribeFlow(player, (change) => {
+  console.log(`${change.flowName}.${change.stateName}: ${change.prevVariant} -> ${change.nextVariant}`);
+  // change.prev / change.next are the real, readable state instances
+});
+```
+
 ### lock
 
 Acquires an exclusive lock on the target for dispatching multiple signals in sequence. Uses `await using` for automatic cleanup.

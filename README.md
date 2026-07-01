@@ -129,6 +129,7 @@ testing, and architecture — see the [documentation](#documentation).
 | **`applyFlow`** | Binds state definitions to a target object and registers enter/update/exit/rollback handlers. |
 | **`lock` / `send`** | Acquire an async-disposable lock, then dispatch signals so they queue safely instead of throwing during an active transition. |
 | **`observe`** | Subscribe to variant changes for UI updates and side effects. |
+| **`subscribeFlow`** | Observation-only subscription to every state change on a flow (post-commit, one macrotask per change); receives the real, frozen prev/next state instances — cannot dispatch, enqueue, or mutate state. |
 
 ## Documentation
 

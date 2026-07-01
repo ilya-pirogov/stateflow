@@ -97,7 +97,38 @@ export type StateFlowMeta = {
    * snapshot captured at `lock()` CALL time (null without a provider — the default).
    * See `lock(target, label)` and `emitGrouped`. */
   logGroup: { label: string; pending: Array<Promise<StateFlowLogEntry>>; context: string | null } | null;
+  /** Observation-only per-flow subscribers (see `subscribeFlow`). Each committed or rolled-back
+   * state change is delivered to every subscriber as a `FlowChange`, post-commit, on its own
+   * macrotask. Empty by default so a flow with no subscribers pays nothing. */
+  flowSubscribers: Set<FlowSubscriber>;
 };
+
+/**
+ * A single state change delivered to a {@link FlowSubscriber}. Describes one state whose
+ * variant/props changed within a dispatch, with the real (readable, frozen) state instances
+ * before and after.
+ */
+export interface FlowChange<T = unknown> {
+  /** Name of the flow container (the target's `Symbol.toStringTag` / constructor name). */
+  flowName: string;
+  /** Name of the state definition that changed (e.g. `"playback"`). */
+  stateName: string;
+  /** Variant name before the change (e.g. `"off"`). */
+  prevVariant: string;
+  /** Variant name after the change (e.g. `"on"`). */
+  nextVariant: string;
+  /** The real state instance before the change — frozen, props readable. */
+  prev: T;
+  /** The real state instance after the change — frozen, props readable. */
+  next: T;
+  /** Stringified signal that drove the dispatch. */
+  signal: string;
+  /** `"commit"` for a forward apply, `"rollback"` for an enqueue-chain rollback restore. */
+  kind: "commit" | "rollback";
+}
+
+/** Observation-only callback invoked once per changed state after commit. See `subscribeFlow`. */
+export type FlowSubscriber = (change: FlowChange) => void;
 
 export interface FlowConfig {
   logHandlers?: StateFlowLogHandler[];
@@ -248,6 +279,7 @@ export function applyFlow<TStates extends Array<object>>(
     lockHolder: null,
     lockQueue: [],
     logGroup: null,
+    flowSubscribers: new Set(),
     name: String(Symbol.toStringTag in target ? target[Symbol.toStringTag] : target.constructor.name),
   });
 
@@ -588,7 +620,7 @@ function processEnqueueChain(
 
       if (enqResult.in(ResultKind.Rejected, ResultKind.Error)) {
         // full rollback to pre-chain state
-        rollbackToSnapshot(target, chainSnapshot);
+        rollbackToSnapshot(target, chainSnapshot, meta, String(signal));
         return enqResult;
       }
 
@@ -601,10 +633,24 @@ function processEnqueueChain(
 
 /**
  * Restores all states on target from a snapshot.
+ * Emits a `"rollback"` FlowChange for every state actually restored (only when subscribers exist).
  */
-function rollbackToSnapshot(target: object, snapshot: Record<string, StateInstance>): void {
+function rollbackToSnapshot(
+  target: object,
+  snapshot: Record<string, StateInstance>,
+  meta: StateFlowMeta,
+  signal: string,
+): void {
+  const changes: FlowChange[] | null = meta.flowSubscribers.size > 0 ? [] : null;
   for (const [key, value] of Object.entries(snapshot)) {
+    const prev = Reflect.get(target, key);
+    if (changes != null && prev !== value) {
+      changes.push(buildFlowChange(meta, key, prev, value, signal, "rollback"));
+    }
     Reflect.set(target, key, value);
+  }
+  if (changes != null) {
+    emitFlowChanges(meta, changes);
   }
 }
 
@@ -701,15 +747,75 @@ function prepareStatesAfterSignal(
 
 function applyState(target: object, snapshot: Record<string, StateInstance>, rc: ResultCollector): void {
   const meta = stateMeta(target);
+  // Only allocate/collect when someone is listening — zero-cost otherwise.
+  const changes: FlowChange[] | null = meta.flowSubscribers.size > 0 ? [] : null;
 
   currentRC.set(rc);
   for (const [key, value] of Object.entries(snapshot)) {
-    if (value !== Reflect.get(target, key)) {
-      meta.emitter.emit(eventKey("observe", String(value[VARIANT])), Reflect.get(target, key), value);
+    const prev = Reflect.get(target, key);
+    if (value !== prev) {
+      meta.emitter.emit(eventKey("observe", String(value[VARIANT])), prev, value);
+      if (changes != null) {
+        changes.push(buildFlowChange(meta, key, prev, value, rc.signal, "commit"));
+      }
       Reflect.set(target, key, value);
     }
   }
   currentRC.clear();
+
+  if (changes != null) {
+    emitFlowChanges(meta, changes);
+  }
+}
+
+/**
+ * Builds one observation-only change record from the pre/post state instances.
+ */
+function buildFlowChange(
+  meta: StateFlowMeta,
+  stateName: string,
+  prev: StateInstance,
+  next: StateInstance,
+  signal: string,
+  kind: "commit" | "rollback",
+): FlowChange {
+  return {
+    flowName: meta.name,
+    stateName,
+    prevVariant: String(prev[VARIANT][Symbol.toStringTag]),
+    nextVariant: String(next[VARIANT][Symbol.toStringTag]),
+    prev,
+    next,
+    signal,
+    kind,
+  };
+}
+
+/**
+ * Delivers each change to every current subscriber on its OWN post-commit macrotask.
+ * Subscribers are observation-only: a throwing subscriber is swallowed so it can never
+ * affect the dispatch or the other subscribers, and delivery is re-checked against the
+ * live set so a subscriber disposed after scheduling stops receiving.
+ */
+function emitFlowChanges(meta: StateFlowMeta, changes: FlowChange[]): void {
+  if (changes.length === 0 || meta.flowSubscribers.size === 0) {
+    return;
+  }
+  const subscribers = [...meta.flowSubscribers];
+  for (const change of changes) {
+    for (const subscriber of subscribers) {
+      setTimeout(() => {
+        if (!meta.flowSubscribers.has(subscriber)) {
+          return;
+        }
+        try {
+          subscriber(change);
+        } catch {
+          /* observation-only: never affect dispatch or other subscribers */
+        }
+      }, 0);
+    }
+  }
 }
 
 function processHandlers(
@@ -800,6 +906,42 @@ export function observe<T>(
       for (const stateVar of stateVariants) {
         unsubscribe(meta.emitter, stateVar, handlerFn);
       }
+    },
+  };
+}
+
+/**
+ * Subscribes to committed state changes of a flow, observation-only.
+ *
+ * Unlike {@link observe}, a `subscribeFlow` subscriber cannot influence the flow at all: it
+ * receives a plain {@link FlowChange} value (with the real, frozen `prev`/`next` state instances)
+ * and has no handle to dispatch, enqueue, or mutate flow state. It runs strictly AFTER the state
+ * has committed, each change on its own macrotask, so nothing it does can reorder or block the
+ * dispatch. A throwing subscriber is isolated — it never affects the dispatch or other subscribers.
+ *
+ * One {@link FlowChange} is delivered per state that actually changed in a dispatch: `kind` is
+ * `"commit"` on a forward apply and `"rollback"` when an enqueue-chain failure restores prior
+ * state. With no subscribers registered, dispatch is entirely unaffected and pays nothing.
+ *
+ * @param target - Object initialized with {@link applyFlow}
+ * @param subscriber - Observation-only callback invoked once per changed state, post-commit
+ * @returns A {@link Disposer} — dispose it (e.g. via `using`) to stop delivery
+ * @throws StateFlowError if `target` was not initialized with {@link applyFlow}
+ *
+ * @example
+ * ```ts
+ * using sub = subscribeFlow(player, (change) => {
+ *   console.log(`${change.flowName}.${change.stateName}: ${change.prevVariant} -> ${change.nextVariant}`);
+ *   // change.prev / change.next are the real, readable state instances
+ * });
+ * ```
+ */
+export function subscribeFlow(target: object, subscriber: FlowSubscriber): Disposer {
+  const meta = stateMeta(target);
+  meta.flowSubscribers.add(subscriber);
+  return {
+    [Symbol.dispose]: () => {
+      meta.flowSubscribers.delete(subscriber);
     },
   };
 }

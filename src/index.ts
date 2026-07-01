@@ -3,7 +3,19 @@ import packageJson from "./package-json";
 // `dispatch` is a deprecated escape hatch — prefer `lock()` + `send()`. It stays exported
 // only for synchronous teardown / pre-lock bootstrap (see its JSDoc); all other code should
 // acquire a lock so signals queue instead of throwing under a held lock / active transition.
-export { applyFlow, DispatchFn, dispatch, disposeFlow, lock, observe, StateManager, sync } from "./flow";
+export {
+  applyFlow,
+  DispatchFn,
+  dispatch,
+  disposeFlow,
+  FlowChange,
+  FlowSubscriber,
+  lock,
+  observe,
+  StateManager,
+  subscribeFlow,
+  sync,
+} from "./flow";
 export {
   addGlobalLogHandler,
   consoleLogHandler,

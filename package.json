@@ -1,6 +1,6 @@
 {
   "name": "@state-flow/core",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Type-safe, immutable state management built on signals, flows, and frozen state snapshots.",
   "license": "MIT",
   "author": "Ilya Pirogov",
