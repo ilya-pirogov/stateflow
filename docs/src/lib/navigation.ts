@@ -13,6 +13,7 @@ export const navigation = [
       { title: 'State consistency', href: '/docs/state-consistency' },
       { title: 'Signal system', href: '/docs/signal-system' },
       { title: 'State visibility', href: '/docs/state-visibility' },
+      { title: 'Boxing live resources', href: '/docs/boxing-live-resources' },
     ],
   },
   {

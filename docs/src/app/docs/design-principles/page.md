@@ -118,11 +118,11 @@ observe(app, [mediaState.playing], (state) => {
 StateFlow chooses immutability as the default because it eliminates an entire class of bugs:
 
 ```typescript
-// Shallow immutability with Object.freeze()
+// Deep immutability: state is deep-frozen on construction (sealProps)
 const state = mediaState.playing({ position: 30, duration: 180 });
 Object.isFrozen(state); // true
 
-// Deep freezing for nested objects
+// Nested objects/arrays are frozen too, automatically — no custom parser needed
 const complexState = defineState<{
   user: { id: string; preferences: { theme: string } };
   sessions: Array<{ id: string; active: boolean }>;
@@ -130,12 +130,16 @@ const complexState = defineState<{
   .name("app")
   .signals(signals)
   .variant("loaded", true)
-  .parser(obj => {
-    // Custom parser can implement deep freezing
-    return deepFreeze(obj);
-  })
   .build();
+
+Object.isFrozen(complexState); // true
+Object.isFrozen(complexState.user); // true — nested objects are frozen too
 ```
+
+State is also **flat**: every prop is either deep-frozen value data or an opaque
+[`Box`](/docs/boxing-live-resources) handle for a live resource (a `MediaStream`, a socket)
+that cannot be frozen. Reducers may place a `Box` in state but must never `deref()` it — that,
+like dispatching from inside a reducer, throws — because reducers must stay pure.
 
 **Trade-offs**:
 - ✅ **Pros**: No accidental mutations, safe sharing, predictable behavior

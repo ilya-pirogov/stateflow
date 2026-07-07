@@ -29,7 +29,9 @@
  * ```
  */
 
+import { runInReducer } from "./reducer-scope";
 import { Result } from "./result";
+import { sealProps } from "./seal-props";
 import type { Signal, SignalHandler, SignalHandlers } from "./signal";
 import { DEF, HANDLERS, IS_INITIAL, PARSER, SIGNALS, STRING_REPR, VARIANT } from "./symbols";
 import { type Infer, StateFlowError, serializeDebug } from "./utils";
@@ -51,10 +53,14 @@ export type ExtractSignals<T> =
       : never;
 
 export type ExtractName<T> =
-  T extends StateDefinition<any, "", any, infer TName>
-    ? TName
-    : T extends StateVariant<any, "", any, infer TName>
-      ? TName
+  T extends StateDefinition<infer _TProps, infer _TVariants, infer _TSignals, infer TName>
+    ? [TName] extends [""]
+      ? never
+      : TName
+    : T extends StateVariant<infer _TProps, infer _TVariants, infer _TSignals, infer TName>
+      ? [TName] extends [""]
+        ? never
+        : TName
       : never;
 
 export type ArrayToRecord<T extends readonly unknown[]> = {
@@ -192,6 +198,8 @@ function factory<TProps, TVariants extends PropertyKey, TSignals>(
 ): StateInstance<TProps, TVariants, TSignals> {
   const name = String(value);
   const inst = value[DEF][PARSER](props as object) as StateInstance<TProps, TVariants, TSignals>;
+
+  sealProps(inst); // deep-freeze plain data / accept immutable-value-like / skip Boxes / verdict on live instances
 
   Object.defineProperties(inst, {
     [Symbol.toStringTag]: { value: name, writable: false, configurable: false, enumerable: false },
@@ -385,7 +393,7 @@ export function handleSignal<TProps, TState extends StateInstance<TProps, string
   const handler = state[VARIANT][HANDLERS][signalName] as SignalHandler<TProps>;
 
   try {
-    const result = handler(state, signal, ctx);
+    const result = runInReducer(() => handler(state, signal, ctx));
     if (result instanceof Result) {
       return result as Result<TState>;
     }

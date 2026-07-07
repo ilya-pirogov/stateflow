@@ -1,6 +1,6 @@
 import type { SignalDefinition } from "./signal";
 import type { StateDefinition, StateVariant } from "./state";
-import { VARIANT } from "./symbols";
+import { FROZEN, VARIANT } from "./symbols";
 
 // Compact stacktrace format types
 
@@ -17,9 +17,9 @@ export type CompactFrameArray = CompactFrame[];
 export type CompactStackTrace = [CompactUrlArray, CompactFrameArray];
 
 export type Infer<T> =
-  T extends StateDefinition<infer TProps, "", unknown, string>
+  T extends StateDefinition<infer TProps, infer _TVariants, infer _TSignals, infer _TName>
     ? TProps
-    : T extends StateVariant<infer TProps, "", unknown, string>
+    : T extends StateVariant<infer TProps, infer _TVariants, infer _TSignals, infer _TName>
       ? TProps
       : T extends SignalDefinition<infer TArgs>
         ? TArgs
@@ -141,7 +141,7 @@ function isObject(val: unknown): val is Record<string, unknown> {
   return val !== null && typeof val === "object" && !Array.isArray(val);
 }
 
-function isPlainObject(val: unknown): val is object {
+export function isPlainObject(val: unknown): val is object {
   if (!isObject(val)) {
     return false;
   }
@@ -156,6 +156,38 @@ function getClassName(val: object): string {
     return proto.constructor.name;
   }
   return "Object";
+}
+
+export function isUrlLike(val: object): boolean {
+  return getClassName(val) === "URL" && typeof (val as { href?: unknown }).href === "string";
+}
+
+// DOM Event duck-check: state-flow compiles DOM-lib-free, so no `instanceof Event` — a string
+// `type` plus an `*Event` constructor name identifies one.
+export function isEventLike(val: object): boolean {
+  return typeof (val as { type?: unknown }).type === "string" && getClassName(val).endsWith("Event");
+}
+
+/**
+ * True for values that are safe to hold in flat state by freezing them IN PLACE (shallow) —
+ * `Error`/`RegExp`/URL-like/Event-like, plus anything already `Object.isFrozen`, plus the
+ * `FROZEN`-branded collections. Shared with `sealProps` so the carve-out list cannot drift.
+ * NOTE: the already-frozen branch TRUSTS the caller's deep-immutability claim — it does not verify.
+ */
+export function isImmutableValueLike(val: unknown): boolean {
+  if (val === null || typeof val !== "object") {
+    return false;
+  }
+  if (Object.isFrozen(val)) {
+    return true;
+  }
+  if (Reflect.has(val, FROZEN)) {
+    return true;
+  }
+  if (val instanceof Error || val instanceof RegExp) {
+    return true;
+  }
+  return isUrlLike(val) || isEventLike(val);
 }
 
 function flattenPath(val: unknown, path: string[] = [], depthBudget: number = maxDepth): FlattenResult {
@@ -327,12 +359,12 @@ function serializeValue(val: unknown, depth: number = 0): string {
 
     // DOM Event duck-check: state-flow compiles DOM-lib-free, so no instanceof
     // Event — a string `type` plus an *Event constructor name identifies one.
-    if (typeof (val as { type?: unknown }).type === "string" && getClassName(val).endsWith("Event")) {
+    if (isEventLike(val)) {
       return `${getClassName(val)}(${(val as { type: string }).type})`;
     }
 
     // URL duck-check (same DOM-free constraint): constructor name + href.
-    if (getClassName(val) === "URL" && typeof (val as { href?: unknown }).href === "string") {
+    if (isUrlLike(val)) {
       return serializeValue((val as { href: string }).href, depth);
     }
 

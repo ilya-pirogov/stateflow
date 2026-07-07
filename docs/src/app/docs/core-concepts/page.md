@@ -25,7 +25,7 @@ const userState = defineState<{
   .stringRepr(s => `${s.email} (${s.loginAttempts} attempts)`)
   .build();
 
-// Create state instance (immutable and frozen)
+// Create state instance (deep-frozen on construction)
 const guest = userState.guest({
   id: '',
   email: '',
@@ -35,7 +35,7 @@ const guest = userState.guest({
 ```
 
 **Key Points:**
-- States are frozen with `Object.freeze()` preventing mutations
+- States are **deep-frozen** on construction (nested objects/arrays included), preventing mutation; live resources go in an opaque [`Box`](/docs/boxing-live-resources)
 - Variants represent different phases (guest, authenticated, locked)
 - Each variant shares the same data structure
 - String representations aid debugging

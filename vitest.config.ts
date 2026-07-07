@@ -6,4 +6,7 @@ export default defineConfig({
     exclude: ["lib-cjs/**", "lib-esm/**", "types/**"],
     environment: "node",
   },
+  benchmark: {
+    include: ["src/**/.tests/*.bench.ts"],
+  },
 });

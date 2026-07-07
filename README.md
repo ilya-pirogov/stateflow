@@ -16,8 +16,12 @@ end to end.
 
 - **Signals are the only path to change.** State can never be mutated directly — you
   dispatch a typed signal and the flow decides what happens. Every change is tracked.
-- **Immutable snapshots.** State instances are frozen with `Object.freeze()`; transitions
-  produce new snapshots rather than mutating existing ones.
+- **Deeply-immutable snapshots.** State instances are deep-frozen on construction — nested
+  objects and arrays included, not just the top level. Live resources that can't be frozen
+  (a `MediaStream`, a socket) are held in an opaque `Box` and skipped by the freeze.
+- **Flat state + `Box`.** Every state prop is either deep-frozen value data or an opaque
+  `Box` handle. `Box.deref()` reads the live resource in effects/observers but throws
+  inside a pure reducer. `FrozenSet`/`FrozenMap` hold set/map-shaped data immutably.
 - **Pure, synchronous transitions.** `defineFlow` handlers are synchronous and return a
   new state or a `Result` (`ok` / `ignore` / `reject` / `error`) — the right place to
   validate input. Side effects and async work live in `applyFlow` handlers via
@@ -130,6 +134,8 @@ testing, and architecture — see the [documentation](#documentation).
 | **`lock` / `send`** | Acquire an async-disposable lock, then dispatch signals so they queue safely instead of throwing during an active transition. |
 | **`observe`** | Subscribe to variant changes for UI updates and side effects. |
 | **`subscribeFlow`** | Observation-only subscription to every state change on a flow (post-commit, one macrotask per change); receives the real, frozen prev/next state instances — cannot dispatch, enqueue, or mutate state. |
+| **`Box` / `isBox`** | An opaque, owned handle for a live resource in state — deref in effects/observers (throws in reducers), compare by identity. |
+| **`FrozenSet` / `FrozenMap`** | Immutable, throw-on-mutate collections for set/map-shaped state props. |
 
 ## Documentation
 

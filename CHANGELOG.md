@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Box` / `isBox` — an opaque, owned handle for live resources (MediaStream, sockets, DOM
+  elements) that must live in state without being deep-frozen. `Box.deref()` returns the
+  wrapped reference in effect/observer scope and **throws inside a reducer**; `equals`
+  compares by identity; the wrapper serializes as `Box(<name>#<id>)`.
+- `FrozenSet` / `FrozenMap` — immutable, throw-on-mutate collections usable directly in state
+  props (e.g. `capacities: FrozenSet<string>`).
+- **Flat-state enforcement** — every constructed state now deep-freezes its plain-data props
+  (nested objects/arrays included), not just the top-level container. `Box`es are skipped
+  (their interior stays live); a raw live class instance in a prop is dev-warned.
+- **Reducer-access rule** — dispatching from inside a reducer now throws a `StateFlowError`
+  (reducers are pure — no side effects, no dispatch).
+
+### Fixed
+
+- `Infer` / `ExtractName` — corrected an over-narrow type constraint that made
+  `Infer<typeof builtState>` resolve to `never` (and broke multi-state `applyFlow` with
+  strongly-typed targets). Both now wildcard-infer, so `Infer` recovers the real props from a
+  built `StateDefinition`/`StateVariant` and `ExtractName` recovers the real state name. The
+  `SignalDefinition` branch (`Infer<typeof someSignal>`) is unchanged.
+
 ## [1.1.0] - 2026-07-01
 
 ### Added

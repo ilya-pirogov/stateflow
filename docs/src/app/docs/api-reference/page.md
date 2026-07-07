@@ -469,6 +469,102 @@ sm.addEnterHandler(orderState.processing, (state) => {
 });
 ```
 
+## Boxing & Flat State
+
+Every constructed state is deep-frozen (see [Boxing live resources](/docs/boxing-live-resources)
+for the full model). `Box` is the escape hatch for props that hold a live resource — a
+`MediaStream`, a socket, a DOM element — that cannot be frozen. `FrozenSet` / `FrozenMap` are
+the immutable collection types for set/map-shaped props.
+
+### Box
+
+An opaque, owned handle to a live resource. Its interior is intentionally not frozen.
+
+```typescript
+class Box<T> {
+  static of<T>(value: T, opts?: BoxOptions): Box<T>;
+  deref(): T;
+  equals(other: unknown): boolean;
+  readonly id: string;
+  readonly displayName: string;
+}
+
+interface BoxOptions {
+  displayName?: string;
+}
+```
+
+- **`Box.of(value, opts?)`** — wraps `value` in a new `Box`. `opts.displayName` overrides the
+  name StateFlow otherwise derives from `value.constructor.displayName` / `.name`.
+- **`deref()`** — returns the wrapped value. Legal from an enter/exit/update handler or an
+  observer. **Throws a `StateFlowError` when called inside a reducer** — reducers are pure and
+  must not read live resources.
+- **`equals(other)`** — reference-identity comparison against another value. Safe in any scope;
+  never reads contents. Do not compare `Box` wrappers with `===` — re-wrapping the same value
+  with `Box.of` mints a new wrapper instance.
+- **`id`** — a stable, per-instance identifier, e.g. `"Box#3"`.
+- **`displayName`** — the resolved display name.
+- Serializes (via `String(box)` / template interpolation) as `Box(<displayName>#<n>)`, e.g.
+  `Box(MediaStream#3)`.
+
+```typescript
+const camera = Box.of(mediaStream);
+// from an enter/exit/update handler or an observer:
+const stream = camera.deref(); // legal
+stream.getTracks().forEach((t) => t.stop());
+```
+
+### isBox
+
+Narrows a value to `Box<unknown>`.
+
+```typescript
+function isBox(v: unknown): v is Box<unknown>;
+```
+
+### FrozenSet
+
+An immutable `Set`. Extends native `Set`, so `has`/`size`/iteration behave normally; mutators
+(`add`, `delete`, `clear`) throw a `StateFlowError`. `intersection` / `symmetricDifference`
+return plain, mutable `Set` instances for further manipulation.
+
+```typescript
+class FrozenSet<T> extends Set<T> {
+  constructor(iterable?: Iterable<T> | null);
+  intersection(other: Iterable<T>): Set<T>;
+  symmetricDifference(other: Iterable<T>): Set<T>;
+}
+```
+
+```typescript
+const state = defineState<{ tags: FrozenSet<string> }>()
+  .variant("active", true)
+  .build();
+const inst = state.active({ tags: new FrozenSet(["a", "b"]) });
+inst.tags.has("a"); // true
+inst.tags.add("c"); // throws StateFlowError
+```
+
+### FrozenMap
+
+An immutable `Map`. Extends native `Map`, so `get`/`has`/`size`/iteration behave normally;
+mutators (`set`, `delete`, `clear`) throw a `StateFlowError`.
+
+```typescript
+class FrozenMap<K, V> extends Map<K, V> {
+  constructor(iterable?: Iterable<readonly [K, V]> | null);
+}
+```
+
+```typescript
+const state = defineState<{ config: FrozenMap<string, number> }>()
+  .variant("idle", true)
+  .build();
+const inst = state.idle({ config: new FrozenMap([["timeout", 5000]]) });
+inst.config.get("timeout"); // 5000
+inst.config.set("retry", 3); // throws StateFlowError
+```
+
 ## Type Utilities
 
 TypeScript utilities for extracting type information:

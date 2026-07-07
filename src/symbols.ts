@@ -6,6 +6,8 @@ export const SIGNALS = Symbol.for("SIGNALS");
 export const HANDLERS = Symbol.for("HANDLERS");
 export const STRING_REPR = Symbol.for("STRING_REPR");
 export const PARSER = Symbol.for("PARSER");
+export const BOX = Symbol.for("BOX");
+export const FROZEN = Symbol.for("FROZEN");
 
 // small polyfill
 if (typeof Symbol.dispose === "undefined") {

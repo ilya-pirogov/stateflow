@@ -1,5 +1,7 @@
 import packageJson from "./package-json";
 
+export { Box, BoxOptions, isBox } from "./box";
+
 // `dispatch` is a deprecated escape hatch — prefer `lock()` + `send()`. It stays exported
 // only for synchronous teardown / pre-lock bootstrap (see its JSDoc); all other code should
 // acquire a lock so signals queue instead of throwing under a held lock / active transition.
@@ -16,6 +18,7 @@ export {
   subscribeFlow,
   sync,
 } from "./flow";
+export { FrozenMap, FrozenSet } from "./frozen-collections";
 export {
   addGlobalLogHandler,
   consoleLogHandler,

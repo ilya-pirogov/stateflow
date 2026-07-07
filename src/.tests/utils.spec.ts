@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { serializeDebug } from "../utils"; // Adjust import path as needed
+import { FROZEN } from "../symbols";
+import { isImmutableValueLike, serializeDebug } from "../utils";
 
 describe("serializeDebug", () => {
   describe("Basic types", () => {
@@ -360,5 +361,41 @@ describe("serializeDebug native objects", () => {
       }
     }
     expect(serializeDebug({ m: new FancyMap() })).toBe("m=fancy");
+  });
+});
+
+describe("isImmutableValueLike", () => {
+  // DOM-free duck-typed stand-ins: state-flow compiles without the DOM lib, so URL/Event are
+  // identified structurally (constructor name + a signature field), matching serializeValue.
+  // NOTE: the URL stand-in overrides its constructor name rather than being `class URL` — a
+  // local `class URL` collides with the global and esbuild renames it to `URL2`.
+  class UrlStandIn {
+    href = "https://example.test/";
+  }
+  Object.defineProperty(UrlStandIn, "name", { value: "URL" });
+  class FooEvent {
+    type = "foo";
+  }
+
+  it("accepts immutable-value-like objects", () => {
+    expect(isImmutableValueLike(new Error("x"))).toBe(true);
+    expect(isImmutableValueLike(/re/)).toBe(true);
+    expect(isImmutableValueLike(new UrlStandIn())).toBe(true);
+    expect(isImmutableValueLike(new FooEvent())).toBe(true);
+    expect(isImmutableValueLike(Object.freeze({ a: 1 }))).toBe(true);
+    // FROZEN-branded value (what FrozenSet/FrozenMap carry): isolate the brand branch with an
+    // un-frozen branded object so this asserts the brand path, not the Object.isFrozen path.
+    const branded = {};
+    Object.defineProperty(branded, FROZEN, { value: true, enumerable: false });
+    expect(isImmutableValueLike(branded)).toBe(true);
+  });
+
+  it("rejects mutable / non-value-like inputs", () => {
+    expect(isImmutableValueLike({ a: 1 })).toBe(false);
+    expect(isImmutableValueLike([1, 2])).toBe(false);
+    expect(isImmutableValueLike(new Set([1]))).toBe(false);
+    expect(isImmutableValueLike(new Map())).toBe(false);
+    expect(isImmutableValueLike(42)).toBe(false);
+    expect(isImmutableValueLike(null)).toBe(false);
   });
 });

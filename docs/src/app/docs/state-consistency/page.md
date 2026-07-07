@@ -39,7 +39,7 @@ const state = playbackState.playing({
 state.position = 45; // TypeError: Cannot assign to read only property
 ```
 
-State instances are shallow-frozen via `Object.freeze()`; top-level props cannot be reassigned, but nested objects/arrays are not recursively frozen.
+State instances are **deep-frozen** on construction (`sealProps`): top-level props AND nested plain objects/arrays are recursively frozen, so no part of a committed state can be mutated. Live resources that cannot be frozen are wrapped in an opaque [`Box`](/docs/boxing-live-resources) and skipped; raw `Set`/`Map` should be `FrozenSet`/`FrozenMap`.
 
 ### Type-Level Immutability
 

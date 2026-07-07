@@ -1,6 +1,6 @@
 {
   "name": "@state-flow/core",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Type-safe, immutable state management built on signals, flows, and frozen state snapshots.",
   "license": "MIT",
   "author": "Ilya Pirogov",
@@ -46,17 +46,18 @@
     "provenance": true
   },
   "scripts": {
-    "clean": "rimraf dist",
+    "bench": "vitest bench --run",
     "build": "npm run build:json && tsup && tsc -p tsconfig.dts.json && rimraf dist/examples.d.ts dist/examples.d.ts.map dist/logger-mock.d.ts dist/logger-mock.d.ts.map",
     "build:json": "HASH=$(git rev-parse HEAD 2>/dev/null || echo \"\") && BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"\") && echo 'export default { name: \"'${npm_package_name}'\", version: \"'${npm_package_version}'\", commit: \"'${HASH}'\", branch: \"'${BRANCH}'\" };' > src/package-json.ts",
-    "watch": "tsup --watch",
+    "clean": "rimraf dist",
+    "coverage": "vitest run --coverage",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "prepublishOnly": "npm run clean && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "biome check .",
-    "format": "biome format --write .",
-    "prepublishOnly": "npm run clean && npm run build"
+    "watch": "tsup --watch"
   },
   "dependencies": {
     "events": "^3.3.0"

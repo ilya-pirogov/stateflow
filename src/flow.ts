@@ -49,6 +49,7 @@ import {
   type StateFlowLogHandler,
   withGlobalLogHandlers,
 } from "./logger";
+import { isInReducer } from "./reducer-scope";
 import { mergeResults, Result, ResultCollector, ResultKind } from "./result";
 import type { Signal } from "./signal";
 import {
@@ -330,6 +331,11 @@ function prepareSnapshot(target: object): Record<string, StateInstance> {
  * ```
  */
 export function dispatch(target: object, signal: Signal, mute = false): Result {
+  // Reducers are pure — no dispatch, no side effects. Fail fast with a clear
+  // message here before the lock/transition checks below get a chance to run.
+  if (isInReducer()) {
+    throw new StateFlowError("Cannot dispatch from inside a reducer");
+  }
   const meta = stateMeta(target);
 
   if (meta.lockHolder != null) {
@@ -474,6 +480,12 @@ export async function lock(target: object, label?: string): Promise<DispatchFn> 
  * Does not check lock or transitioning state — callers must do that.
  */
 function dispatchCore(target: object, signal: Signal, meta: StateFlowMeta, mute: boolean): Result {
+  // Reducers are pure — no dispatch, no side effects. This is the shared chokepoint for
+  // both `dispatch` and locked `send`, so it is the essential guard (the enqueue path
+  // also routes through here, and runs with the flag clear, so no false positive there).
+  if (isInReducer()) {
+    throw new StateFlowError("Cannot dispatch from inside a reducer");
+  }
   const st = new Error().stack;
 
   // for collecting results from all handlers; an unresolved transition at this
