@@ -17,20 +17,20 @@ what we expect from contributions.
 
 ## Project layout
 
-- `src/` — the library source. Public exports are defined in `src/index.ts`.
-- `src/.tests/` — the test suite (vitest, files named `*.spec.ts`).
+- `packages/core/` — the library, published as `@state-flow/core`. Source in `packages/core/src/`; public exports are defined in `packages/core/src/index.ts`.
+- `packages/core/src/.tests/` — the test suite (vitest, files named `*.spec.ts`).
 - `docs/` — the documentation website (a separate Next.js app with its own dependencies).
 
 ## Development workflow
 
 ```bash
 npm test           # run tests once
-npm run test:watch # run tests in watch mode
+npm run test:watch -w @state-flow/core # run tests in watch mode
 npm run typecheck  # type-check with tsc (no emit)
 npm run lint       # lint + format check with Biome
 npm run format     # auto-format with Biome
 npm run build      # bundle with tsup and emit declarations with tsc
-npm run watch      # rebuild on change
+npm run watch -w @state-flow/core      # rebuild on change
 ```
 
 ### Before opening a pull request
@@ -38,7 +38,7 @@ npm run watch      # rebuild on change
 - **Tests pass.** Run `npm test` and add tests for any new behavior or bug fix.
 - **It type-checks and lints.** Run `npm run typecheck` and `npm run lint` (auto-fix formatting with `npm run format`).
 - **It builds.** Run `npm run build` and make sure there are no type errors.
-- **The public API stays intentional.** If you add or change an export in `src/index.ts`,
+- **The public API stays intentional.** If you add or change an export in `packages/core/src/index.ts`,
   call it out in your PR description.
 - **Docs stay in sync.** If you change public behavior, update the relevant page under
   `docs/src/app/docs/`.

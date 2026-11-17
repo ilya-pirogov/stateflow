@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FrozenMap, FrozenSet } from "../frozen-collections";
+import { FrozenMap, FrozenSet } from "../collections";
 import { FROZEN } from "../symbols";
 
 describe("FrozenSet", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { defineSignal, defineState, StateFlowError } from "..";
 import { Box } from "../box";
-import { FrozenSet } from "../frozen-collections";
+import { FrozenSet } from "../collections";
 
 const noop = defineSignal("noop");
 
