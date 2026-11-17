@@ -3,8 +3,11 @@
   "compilerOptions": {
     "noEmit": false,
     "emitDeclarationOnly": true,
+    // The declarations keep their doc comments: they are the contract the shipped agent guide sends an agent to.
+    "removeComments": false,
     "declaration": true,
     "declarationMap": true,
+    "rootDir": "src",
     "declarationDir": "dist",
     "outDir": "dist"
   },

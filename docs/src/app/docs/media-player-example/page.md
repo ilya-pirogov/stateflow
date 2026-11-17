@@ -3,743 +3,603 @@ title: Media Player Example
 description: Complete implementation of a media player using StateFlow
 ---
 
-This comprehensive example demonstrates how to build a fully-featured media player using StateFlow. The implementation showcases state consistency guarantees, signal handling with comprehensive feedback, and clear state visibility throughout the application lifecycle. {% .lead %}
-
-## Overview
-
-The media player implementation demonstrates several key StateFlow concepts working together in a real-world scenario. The player manages multiple interconnected states including playback control, volume management, buffering status, and error handling. Each state transition is carefully validated, side effects are properly managed, and the entire system maintains consistency even during complex operations like seeking or handling network interruptions.
-
-## State Architecture
-
-The media player consists of four primary state definitions that work together to manage the complete player functionality.
-
-{% callout title="Snippets are shown out of execution order" %}
-The state definitions below reference `mediaSignals` via `.signals(mediaSignals)`, but `mediaSignals` is defined in the [Signal Definitions](#signal-definitions) section further down. In real code `mediaSignals` must be declared **before** any state that wires it in — otherwise you hit a temporal dead zone (`Cannot access 'mediaSignals' before initialization`). Treat the Signal Definitions block as appearing first.
-{% /callout %}
-
-### Playback State
-
-The playback state manages the core player lifecycle, tracking position, duration, and playback status. Each variant represents a distinct phase in the media lifecycle, from initial loading through active playback to completion.
-
-```typescript
-const playbackState = defineState<{
-  position: number;      // Current playback position in seconds
-  duration: number;      // Total media duration in seconds
-  playbackRate: number;  // Playback speed multiplier
-  mediaUrl?: string;     // Currently loaded media URL
-  lastError?: Error;     // Most recent error if any
-}>()
-  .name("playback")
-  .signals(mediaSignals)
-  .variant("idle", true)
-  .variant("loading")
-  .variant("ready")
-  .variant("playing")
-  .variant("paused")
-  .variant("ended")
-  .variant("error")
-  .stringRepr(state => {
-    const base = `${state.position.toFixed(1)}/${state.duration.toFixed(1)}s`;
-    if (state.playbackRate !== 1) {
-      return `${base} @${state.playbackRate}x`;
-    }
-    if (state.lastError) {
-      return `${base} - Error: ${state.lastError.message}`;
-    }
-    return base;
-  })
-  .build();
-```
-
-### Volume State
-
-Volume management includes mute functionality with memory of previous volume levels, enabling smooth user experience when toggling mute status.
-
-```typescript
-const volumeState = defineState<{
-  level: number;        // Volume level 0.0 to 1.0
-  muted: boolean;       // Current mute status
-  previousLevel: number; // Remembered level for unmute
-}>()
-  .name("volume")
-  .signals(mediaSignals)
-  .variant("audible", true)
-  .variant("muted")
-  .stringRepr(state => 
-    state.muted ? "muted" : `${Math.round(state.level * 100)}%`
-  )
-  .build();
-```
-
-### Buffer State
-
-Buffer state tracks media loading progress and readiness, providing visibility into network operations and enabling responsive UI updates.
-
-```typescript
-const bufferState = defineState<{
-  bufferedRanges: Array<{ start: number; end: number }>;
-  isBuffering: boolean;
-  bufferHealth: number; // 0.0 to 1.0 indicating buffer sufficiency
-}>()
-  .name("buffer")
-  .signals(mediaSignals)
-  .variant("empty", true)
-  .variant("buffering")
-  .variant("sufficient")
-  .variant("starving")
-  .stringRepr(state => {
-    const total = state.bufferedRanges.reduce(
-      (sum, range) => sum + (range.end - range.start), 0
-    );
-    return `${total.toFixed(1)}s buffered (health: ${state.bufferHealth.toFixed(2)})`;
-  })
-  .build();
-```
-
-### UI State
-
-UI state manages the player interface visibility and interaction modes, ensuring consistent user experience across different player states.
-
-```typescript
-const uiState = defineState<{
-  controlsVisible: boolean;
-  seekPreview?: number;    // Preview position during seek
-  volumeSliderVisible: boolean;
-  lastInteraction: number; // Timestamp of last user interaction
-}>()
-  .name("ui")
-  .signals(mediaSignals)
-  .variant("hidden", true)
-  .variant("visible")
-  .variant("seeking")
-  .variant("adjustingVolume")
-  .stringRepr(state => 
-    state.controlsVisible ? "controls visible" : "controls hidden"
-  )
-  .build();
-```
+A media player built on StateFlow: four states share one set of signals, loading and starting playback are declared transitions, the element's facts reach props as named results, a failure's reason arrives through `FAILURE`, and the player publishes events of its own. Every call to the element sits in a handler, so a test runs the whole player with every handler switched off. {% .lead %}
 
 ## Signal Definitions
 
-Signals provide the controlled interface for all state modifications. Each signal is carefully designed to carry the necessary information while maintaining type safety.
+Every state lists the signals it takes, so they come first:
 
 ```typescript
+type Range = { start: number; end: number };
+
 const mediaSignals = {
-  // Media lifecycle signals
-  load: defineSignal<{
-    url: string;
-    autoplay?: boolean;
-  }>("load"),
-  
+  load: defineSignal<{ url: string }>("load"),
   play: defineSignal("play"),
   pause: defineSignal("pause"),
   stop: defineSignal("stop"),
-  
-  // Playback control signals
-  seek: defineSignal<{
-    position: number;
-    preview?: boolean; // True for preview during drag
-  }>("seek"),
-  
-  setPlaybackRate: defineSignal<{
-    rate: number;
-  }>("setPlaybackRate"),
-  
-  // Volume control signals
-  setVolume: defineSignal<{
-    level: number;
-  }>("setVolume"),
-  
+  retry: defineSignal("retry"),
+  seek: defineSignal<{ position: number; preview?: boolean }>("seek"),
+  setPlaybackRate: defineSignal<{ rate: number }>("setPlaybackRate"),
+  setVolume: defineSignal<{ level: number }>("setVolume"),
   mute: defineSignal("mute"),
   unmute: defineSignal("unmute"),
   toggleMute: defineSignal("toggleMute"),
-  
-  // Buffer management signals
-  bufferUpdate: defineSignal<{
-    ranges: Array<{ start: number; end: number }>;
-    health: number;
-  }>("bufferUpdate"),
-  
-  // UI interaction signals
+  timeUpdate: defineSignal<{ position: number }>("timeUpdate"),
+  bufferUpdate: defineSignal<{ ranges: Range[]; health: number }>("bufferUpdate"),
+  handleError: defineSignal<{ message: string }>("handleError"),
   showControls: defineSignal("showControls"),
   hideControls: defineSignal("hideControls"),
   startSeeking: defineSignal("startSeeking"),
   endSeeking: defineSignal("endSeeking"),
-  
-  // Error handling signals
-  handleError: defineSignal<{
-    error: Error;
-    recoverable: boolean;
-  }>("handleError"),
-  
-  retry: defineSignal("retry"),
-  
-  // Progress update signal
-  timeUpdate: defineSignal<{
-    position: number;
-    buffered: Array<{ start: number; end: number }>;
-  }>("timeUpdate")
 };
+```
+
+## State Architecture
+
+### Playback
+
+Playback runs from loading to the end. Two variants are transitional: `loading` and `starting` hold the player only while a declared transition's work runs. Two are asynchronous: `ready` and `playing` are entered only at the end of a declared transition, once the element did its work. `ready` declares two named results: `loaded`, the duration the element reports, and `tracking`, the ticker that reports progress while media is attached, in a `DisposableBox` that the engine disposes once a committed step drops it.
+
+```typescript
+function parseLoaded(data: unknown): { duration: number } {
+  const duration = (data as { duration?: unknown } | null)?.duration;
+  if (typeof duration !== "number" || !(duration >= 0)) {
+    throw new TypeError("loaded takes a duration in seconds");
+  }
+  return { duration };
+}
+
+function parseTracking(data: unknown): { ticker: DisposableBox<Ticker> } {
+  const ticker = (data as { ticker?: unknown } | null)?.ticker;
+  if (!(ticker instanceof DisposableBox)) {
+    throw new TypeError("tracking takes the ticker in a DisposableBox");
+  }
+  return { ticker };
+}
+
+const playbackState = defineState<{
+  position: number; // seconds
+  duration: number; // seconds
+  playbackRate: number;
+  stalled: boolean; // playing, but the buffer is starving
+  mediaUrl: string | null;
+  lastError: string | null; // why the last load, play or playback failed
+  ticker: DisposableBox<Ticker> | null;
+}>()
+  .name("playback")
+  .signals(mediaSignals)
+  .variant("idle", { initial: true })
+  .variant("loading", { transitional: true })
+  .variant("ready", { async: true, results: { loaded: parseLoaded, tracking: parseTracking } })
+  .variant("starting", { transitional: true })
+  .variant("playing", { async: true })
+  .variant("paused")
+  .variant("ended")
+  .variant("error")
+  .stringRepr((s) => {
+    const base = `${s.position.toFixed(1)}/${s.duration.toFixed(1)}s`;
+    if (s.lastError !== null) {
+      return `${base} - ${s.lastError}`;
+    }
+    return s.playbackRate === 1 ? base : `${base} @${s.playbackRate}x`;
+  })
+  .build();
+```
+
+### Volume, Buffer and Controls
+
+```typescript
+const volumeState = defineState<{ level: number; muted: boolean; previousLevel: number }>()
+  .name("volume")
+  .signals(mediaSignals)
+  .variant("audible", { initial: true })
+  .variant("muted")
+  .stringRepr((s) => (s.muted ? "muted" : `${Math.round(s.level * 100)}%`))
+  .build();
+
+const bufferState = defineState<{ bufferedRanges: Range[]; isBuffering: boolean; bufferHealth: number }>()
+  .name("buffer")
+  .signals(mediaSignals)
+  .variant("empty", { initial: true })
+  .variant("buffering")
+  .variant("sufficient")
+  .variant("starving")
+  .stringRepr((s) => `health ${s.bufferHealth.toFixed(2)}`)
+  .build();
+
+const uiState = defineState<{ seekPreview: number | null }>()
+  .name("ui")
+  .signals(mediaSignals)
+  .variant("hidden", { initial: true })
+  .variant("visible")
+  .variant("seeking")
+  .stringRepr((s) => (s.seekPreview === null ? "" : `preview at ${s.seekPreview}s`))
+  .build();
 ```
 
 ## State Flows
 
-State flows define the valid transitions and business logic for each state variant. These flows ensure that the player behaves correctly in all situations.
+### Playback
 
-### Playback State Flows
+Loading and starting wait for the element, so they are declared transitions into asynchronous variants: the reducer names next, temp and failed, the engine commits temp at once, and the transition handler of the variant entered does the work (see [The Player](#the-player)). The work only succeeds or refuses; where the player goes in either case is the reducer's decision. The reason of a refusal reaches `lastError` through the `[FAILURE]` reducers of `error` and `paused`, the two failed states.
 
 ```typescript
+type PlaybackProps = Infer<typeof playbackState>;
+
+// loading commits at once; ready commits, the duration folded in, when the load's work returns loaded; error commits,
+// with the reason, when the work fails or times out.
+const loadTransition = (s: PlaybackProps) =>
+  StateResult.transition(playbackState.ready(s), playbackState.loading(s), playbackState.error(s), { timeoutMs: 30_000 });
+
+// starting commits at once; playing follows when the element plays, and paused, with the reason, when it refuses.
+const playTransition = (s: PlaybackProps) =>
+  StateResult.transition(
+    playbackState.playing({ ...s, stalled: false, lastError: null }),
+    playbackState.starting(s),
+    playbackState.paused(s),
+    { timeoutMs: 5_000 },
+  );
+
+const recordFailure = (s: PlaybackProps, { reason }: { reason?: string }) => ({ ...s, lastError: reason ?? null });
+
+// idle drops the ticker, which the engine then disposes.
+const stop = () =>
+  playbackState.idle({ position: 0, duration: 0, playbackRate: 1, stalled: false, mediaUrl: null, lastError: null, ticker: null });
+
+// A preview moves the controls' preview (see the ui flows), not the playback.
+const seek = (s: PlaybackProps, { position, preview }: { position: number; preview?: boolean }) => {
+  if (preview === true) {
+    return StateResult.ignored("a preview does not move the playback");
+  }
+  if (position < 0 || position > s.duration) {
+    return StateResult.rejected(`invalid seek position: ${position}`);
+  }
+  return { ...s, position };
+};
+
 defineFlow(playbackState.idle, {
-  load: (state, signal) => playbackState.loading({
-    ...state,
-    mediaUrl: signal.url,
-    position: 0,
-    duration: 0,
-    lastError: undefined
-  }),
-  
-  play: () => Result.reject("No media loaded"),
-  seek: () => Result.reject("No media loaded")
+  load: (s, { url }) => loadTransition({ ...s, mediaUrl: url, position: 0, duration: 0, lastError: null }),
+  play: () => StateResult.rejected("no media loaded"),
+  seek: () => StateResult.rejected("no media loaded"),
 });
 
-defineFlow(playbackState.loading, {
-  handleError: (state, signal) => playbackState.error({
-    ...state,
-    lastError: signal.error
-  }),
-  
-  bufferUpdate: (state, signal) => {
-    // Transition to ready when we have initial buffer
-    if (signal.health > 0.2 && signal.ranges.length > 0) {
-      const duration = Math.max(...signal.ranges.map(r => r.end));
-      return playbackState.ready({
-        ...state,
-        duration,
-        position: 0
-      });
-    }
-    return Result.ignore("Insufficient buffer");
-  }
-});
+// A transitional variant's reducers are abort reducers: dispatch(player, stop(), { abort: true }) cancels a load.
+defineFlow(playbackState.loading, { stop });
 
-defineFlow(playbackState.ready, {
-  play: (state) => playbackState.playing(state),
-  
-  seek: (state, signal) => {
-    if (signal.position < 0 || signal.position > state.duration) {
-      return Result.reject(`Invalid seek position: ${signal.position}`);
-    }
-    return { ...state, position: signal.position };
-  }
-});
+defineFlow(
+  playbackState.ready,
+  { play: (s) => playTransition(s), stop, seek },
+  {
+    loaded: (s, { duration }) => ({ ...s, duration }),
+    tracking: (s, { ticker }) => ({ ...s, ticker }),
+  },
+);
+
+// A pause while the element starts aborts the play: dispatch(player, pause(), { abort: true }).
+defineFlow(playbackState.starting, { pause: (s) => playbackState.paused(s) });
 
 defineFlow(playbackState.playing, {
-  pause: (state) => playbackState.paused(state),
-  
-  stop: () => playbackState.idle({
-    position: 0,
-    duration: 0,
-    playbackRate: 1,
-    mediaUrl: undefined
-  }),
-  
-  timeUpdate: (state, signal) => {
-    const newState = { ...state, position: signal.position };
-    
-    // Check if playback has ended
-    if (signal.position >= state.duration - 0.1) {
-      return playbackState.ended(newState);
-    }
-    
-    return newState;
-  },
-  
-  seek: (state, signal) => {
-    if (signal.position < 0 || signal.position > state.duration) {
-      return Result.reject("Seek position out of range");
-    }
-    return { ...state, position: signal.position };
-  },
-  
-  setPlaybackRate: (state, signal) => {
-    if (signal.rate < 0.25 || signal.rate > 4.0) {
-      return Result.reject("Playback rate must be between 0.25 and 4.0");
-    }
-    return { ...state, playbackRate: signal.rate };
-  }
+  pause: (s) => playbackState.paused({ ...s, stalled: false }),
+  stop,
+  seek,
+  timeUpdate: (s, { position }) =>
+    s.duration > 0 && position >= s.duration - 0.1
+      ? playbackState.ended({ ...s, position, stalled: false, ticker: null })
+      : { ...s, position },
+  // The playback follows the buffer: the same signal reaches both states, which read it the same way.
+  bufferUpdate: (s, { health }) =>
+    isStarving(health) === s.stalled ? StateResult.ignored("stall unchanged") : { ...s, stalled: isStarving(health) },
+  setPlaybackRate: (s, { rate }) =>
+    rate < 0.25 || rate > 4 ? StateResult.rejected("the rate must be between 0.25 and 4") : { ...s, playbackRate: rate },
+  handleError: (s, { message }) => playbackState.error({ ...s, stalled: false, ticker: null, lastError: message }),
 });
 
-defineFlow(playbackState.error, {
-  retry: (state) => {
-    if (!state.mediaUrl) {
-      return Result.reject("No media URL to retry");
-    }
-    return playbackState.loading({
-      ...state,
-      lastError: undefined
-    });
+defineFlow(playbackState.paused, { play: (s) => playTransition(s), stop, seek }, { [FAILURE]: recordFailure });
+
+defineFlow(
+  playbackState.error,
+  {
+    retry: (s) => (s.mediaUrl === null ? StateResult.rejected("no media to retry") : loadTransition({ ...s, lastError: null })),
+    load: (s, { url }) => loadTransition({ ...s, mediaUrl: url, lastError: null }),
   },
-  
-  load: (state, signal) => playbackState.loading({
-    ...state,
-    mediaUrl: signal.url,
-    lastError: undefined
-  })
-});
+  { [FAILURE]: recordFailure },
+);
+
+defineFlow(playbackState.ended, { stop });
 ```
 
-### Volume State Flows
+### Buffer
+
+The buffer's variant follows its health, and playback follows the buffer. One signal, `bufferUpdate`, reaches both states, and every reducer reads the snapshot from before the signal, so neither sees the other's answer. The rule they share is a plain function, which both call on the signal:
 
 ```typescript
+type BufferProps = Infer<typeof bufferState>;
+
+/** A buffer with less than a tenth of its target ahead is starving. */
+const isStarving = (health: number) => health < 0.1;
+
+const bufferReducer = (s: BufferProps, { ranges, health }: { ranges: Range[]; health: number }) => {
+  const next = { ...s, bufferedRanges: ranges, bufferHealth: health, isBuffering: health < 1 };
+  if (ranges.length === 0) {
+    return bufferState.empty(next);
+  }
+  if (isStarving(health)) {
+    return bufferState.starving(next);
+  }
+  return health < 0.5 ? bufferState.buffering(next) : bufferState.sufficient(next);
+};
+
+defineFlow(bufferState.empty, { bufferUpdate: bufferReducer });
+defineFlow(bufferState.buffering, { bufferUpdate: bufferReducer });
+defineFlow(bufferState.sufficient, { bufferUpdate: bufferReducer });
+defineFlow(bufferState.starving, { bufferUpdate: bufferReducer });
+```
+
+### Volume and Controls
+
+```typescript
+const checkLevel = (level: number) => (level < 0 || level > 1 ? StateResult.rejected("the volume must be between 0 and 1") : null);
+
 defineFlow(volumeState.audible, {
-  setVolume: (state, signal) => {
-    if (signal.level < 0 || signal.level > 1) {
-      return Result.reject("Volume must be between 0 and 1");
-    }
-    
-    return {
-      ...state,
-      level: signal.level,
-      previousLevel: state.level > 0 ? state.level : state.previousLevel
-    };
-  },
-  
-  mute: (state) => volumeState.muted({
-    ...state,
-    muted: true,
-    previousLevel: state.level
-  }),
-  
-  toggleMute: (state) => volumeState.muted({
-    ...state,
-    muted: true,
-    previousLevel: state.level
-  })
+  setVolume: (s, { level }) =>
+    checkLevel(level) ?? { ...s, level, previousLevel: s.level > 0 ? s.level : s.previousLevel },
+  mute: (s) => volumeState.muted({ ...s, muted: true, previousLevel: s.level }),
+  toggleMute: (s) => volumeState.muted({ ...s, muted: true, previousLevel: s.level }),
 });
 
 defineFlow(volumeState.muted, {
-  unmute: (state) => volumeState.audible({
-    ...state,
-    muted: false,
-    level: state.previousLevel
-  }),
-  
-  toggleMute: (state) => volumeState.audible({
-    ...state,
-    muted: false,
-    level: state.previousLevel
-  }),
-  
-  setVolume: (state, signal) => {
-    // Setting volume while muted unmutes and sets new volume
-    if (signal.level < 0 || signal.level > 1) {
-      return Result.reject("Volume must be between 0 and 1");
-    }
-    
-    return volumeState.audible({
-      ...state,
-      muted: false,
-      level: signal.level
-    });
-  }
+  unmute: (s) => volumeState.audible({ ...s, muted: false, level: s.previousLevel }),
+  toggleMute: (s) => volumeState.audible({ ...s, muted: false, level: s.previousLevel }),
+  // A new volume while muted unmutes.
+  setVolume: (s, { level }) => checkLevel(level) ?? volumeState.audible({ ...s, muted: false, level }),
+});
+
+defineFlow(uiState.hidden, { showControls: (s) => uiState.visible(s) });
+defineFlow(uiState.visible, {
+  hideControls: (s) => uiState.hidden(s),
+  startSeeking: (s) => uiState.seeking({ ...s, seekPreview: null }),
+});
+defineFlow(uiState.seeking, {
+  // A preview moves the preview; the final seek ends the seeking.
+  seek: (s, { position, preview }) => (preview === true ? { ...s, seekPreview: position } : uiState.visible({ ...s, seekPreview: null })),
+  endSeeking: (s) => uiState.visible({ ...s, seekPreview: null }),
 });
 ```
 
-## Application Integration
+## The Player
 
-The media player integrates with the DOM through StateFlow's handler system, managing side effects and ensuring proper cleanup.
+The player is the flow's target: it holds one prop per state, the element it drives, and the events it emits. All of its state lives in StateFlow, every call to the element sits in a handler, and its public events are defined with the flow:
 
 ```typescript
-interface MediaPlayerApp {
-  playback: Infer<typeof playbackState>;
-  volume: Infer<typeof volumeState>;
-  buffer: Infer<typeof bufferState>;
-  ui: Infer<typeof uiState>;
-  
-  // Non-state properties
-  element: HTMLVideoElement;
-  updateInterval?: number;
-}
+import { EventEmitter } from "events";
 
-const player: MediaPlayerApp = {
-  playback: {
+/** Whether a commit moved a state into `variant`: true when `cur` is in it and `prev` was not. */
+const entered = (cur: object, prev: object, variant: StateVariant) => stateVar(cur) === variant && stateVar(prev) !== variant;
+
+class MediaPlayer extends EventEmitter {
+  readonly playback = {
     position: 0,
     duration: 0,
-    playbackRate: 1
-  },
-  volume: {
-    level: 0.7,
-    muted: false,
-    previousLevel: 0.7
-  },
-  buffer: {
-    bufferedRanges: [],
-    isBuffering: false,
-    bufferHealth: 0
-  },
-  ui: {
-    controlsVisible: false,
-    volumeSliderVisible: false,
-    lastInteraction: Date.now()
-  },
-  element: document.querySelector('#video-player') as HTMLVideoElement
-};
+    playbackRate: 1,
+    stalled: false,
+    mediaUrl: null as string | null,
+    lastError: null as string | null,
+    ticker: null as DisposableBox<Ticker> | null,
+  };
+  readonly volume = { level: 0.7, muted: false, previousLevel: 0.7 };
+  readonly buffer = { bufferedRanges: [] as Range[], isBuffering: false, bufferHealth: 0 };
+  readonly ui = { seekPreview: null as number | null };
 
-applyFlow(
-  player,
-  [playbackState, volumeState, bufferState, uiState],
-  (sm) => {
-    // Playback state handlers
-    sm.addEnterHandler(playbackState.loading, (state) => {
-      return Result.transition(async () => {
-        try {
-          player.element.src = state.mediaUrl!;
-          player.element.load(); // HTMLMediaElement.load() returns void — nothing to await
-          
-          // Start monitoring buffer
-          startBufferMonitoring();
-          
-          return Result.ok();
-        } catch (error) {
-          // Resolving the transition to an error result rolls the state back;
-          // dispatch cannot be called while a transition is in progress
-          return Result.error(error);
-        }
-      }, 30000); // 30 second timeout for loading
-    });
-    
-    sm.addEnterHandler(playbackState.playing, (state) => {
-      // State handlers must return a Result synchronously; async work goes
-      // inside Result.transition
-      return Result.transition(async () => {
-        try {
-          await player.element.play();
-          player.element.playbackRate = state.playbackRate;
-          startProgressTracking();
-          return Result.ok();
-        } catch (error) {
-          return Result.error(error);
-        }
-      });
-    });
-    
-    sm.addExitHandler(playbackState.playing, () => {
-      player.element.pause();
-      stopProgressTracking();
-      return Result.ok();
-    });
-    
-    sm.addUpdateHandler(playbackState.playing, (state) => {
-      // Handle seek while playing
-      if (Math.abs(player.element.currentTime - state.position) > 0.5) {
-        player.element.currentTime = state.position;
-      }
-      
-      // Update playback rate if changed
-      if (player.element.playbackRate !== state.playbackRate) {
-        player.element.playbackRate = state.playbackRate;
-      }
-      
-      return Result.ok();
-    });
-    
-    // Volume state handlers
-    sm.addUpdateHandler(volumeState.audible, (state) => {
-      player.element.volume = state.level;
-      player.element.muted = false;
-      updateVolumeDisplay(state.level);
-      return Result.ok();
-    });
-    
-    sm.addEnterHandler(volumeState.muted, () => {
-      player.element.muted = true;
-      updateVolumeDisplay(0);
-      return Result.ok();
-    });
-    
-    // Buffer monitoring.
-    // Side-effect handlers run synchronously BEFORE the transition flag is set, so a
-    // reentrant bare dispatch() here does NOT throw. The cleaner follow-up pattern is to
-    // return Result.enqueue(signal), which queues the signal to run after this dispatch
-    // cycle commits instead of recursing inline.
-    sm.addEnterHandler(bufferState.starving, () => {
-      // Pause playback if buffer is critically low
-      if (player.playback[Symbol.toStringTag] === "playback.playing") {
-        dispatch(player, mediaSignals.pause());
-        showBufferingIndicator();
-      }
-      return Result.ok();
-    });
-    
-    sm.addExitHandler(bufferState.starving, () => {
-      hideBufferingIndicator();
-      // Auto-resume if we were playing
-      if (player.playback[Symbol.toStringTag] === "playback.paused") {
-        dispatch(player, mediaSignals.play());
-      }
-      return Result.ok();
-    });
-  },
-  {
-    logHandlers: [createMediaPlayerLogger()]
+  constructor(readonly element: HTMLVideoElement) {
+    super();
+    applyFlow(
+      this,
+      [playbackState, bufferState, volumeState, uiState],
+      (sm) => {
+        // The load's work: it reports the duration as ready's named result; the element's error, the 30 s timeout
+        // or a stop's abort commits another state, and waitForEvent rejects on the signal's abort.
+        sm.addTransitionHandler(playbackState.ready, async (next, snapshot, prev, key, signal) => {
+          this.element.src = next.mediaUrl ?? "";
+          this.element.load();
+          await waitForEvent(this.element, "loadedmetadata", signal);
+          return playbackState.ready.results.loaded({ duration: this.element.duration });
+        });
+
+        // Entering ready starts the ticker. If the step does not commit, the engine disposes it with the dropped
+        // named result; once committed, it is disposed by the step that drops it: stop, the end, an error.
+        sm.addEnterHandler(playbackState.ready, () =>
+          playbackState.ready.results.tracking({ ticker: DisposableBox.of(new Ticker(this)) }),
+        );
+
+        // A temp's commit handler runs before its work, and its exit handler on every end that leaves it.
+        sm.addCommitHandler(playbackState.loading, () => showLoadingSpinner());
+        sm.addExitHandler(playbackState.loading, () => {
+          hideLoadingSpinner();
+          return HandlerResult.ok();
+        });
+
+        sm.addEnterHandler(playbackState.idle, () => {
+          this.element.removeAttribute("src");
+          this.element.load(); // detaches the old media
+          return HandlerResult.ok();
+        });
+        sm.addEnterHandler(playbackState.error, () => {
+          this.element.removeAttribute("src");
+          return HandlerResult.ok();
+        });
+
+        // The play's work. play() cannot be cancelled, so the handler pauses the element on every abort: a pause
+        // while it is pending, the timeout, a failure. Once playing commits, the signal never aborts.
+        sm.addTransitionHandler(playbackState.playing, async (next, snapshot, prev, key, signal) => {
+          signal.addEventListener("abort", () => this.element.pause(), { once: true });
+          await this.element.play(); // rejects when the browser refuses to play
+          signal.throwIfAborted();
+          this.element.playbackRate = next.playbackRate;
+          return HandlerResult.ok();
+        });
+
+        sm.addEnterHandler(playbackState.paused, () => {
+          this.element.pause();
+          return HandlerResult.ok();
+        });
+
+        sm.addUpdateHandler(playbackState.playing, (s, snapshot, prev) => {
+          if (Math.abs(this.element.currentTime - s.position) > 0.5) {
+            this.element.currentTime = s.position;
+          }
+          this.element.playbackRate = s.playbackRate;
+          if (s.stalled !== prev.stalled) {
+            setBufferingIndicator(s.stalled);
+          }
+          return HandlerResult.ok();
+        });
+
+        sm.addUpdateHandler(volumeState.audible, (s) => {
+          this.element.volume = s.level;
+          this.element.muted = false;
+          return HandlerResult.ok();
+        });
+        sm.addEnterHandler(volumeState.audible, (s) => {
+          this.element.volume = s.level;
+          this.element.muted = false;
+          return HandlerResult.ok();
+        });
+        sm.addEnterHandler(volumeState.muted, () => {
+          this.element.muted = true;
+          return HandlerResult.ok();
+        });
+
+        // The player's public events: emitted through its own emit, on a timer turn after the commit.
+        sm.defineEvent("loaded", (cur, prev) => entered(cur.playback, prev.playback, playbackState.ready), (cur) => cur.playback.duration);
+        sm.defineEvent("ended", (cur, prev) => entered(cur.playback, prev.playback, playbackState.ended));
+        sm.defineEvent("failed", (cur, prev) => entered(cur.playback, prev.playback, playbackState.error), (cur) => cur.playback.lastError);
+      },
+      { logHandlers: [mediaPlayerLog] },
+    );
   }
-);
+}
 ```
 
 ## Helper Functions
 
-Supporting functions manage the media element interaction and UI updates.
-
 ```typescript
-function startProgressTracking() {
-  player.updateInterval = window.setInterval(async () => {
-    const element = player.element;
-    
-    // Build buffered ranges
-    const buffered: Array<{ start: number; end: number }> = [];
-    for (let i = 0; i < element.buffered.length; i++) {
-      buffered.push({
-        start: element.buffered.start(i),
-        end: element.buffered.end(i)
-      });
-    }
-    
-    // Acquire a lock so these periodic dispatches queue behind any in-flight
-    // transition instead of throwing. The second argument to send() mutes logging.
-    await using send = await lock(player);
-    
-    // Dispatch time update (muted to avoid log spam)
-    await send(mediaSignals.timeUpdate({
-      position: element.currentTime,
-      buffered
-    }), true).done();
-    
-    // Update buffer health
-    const bufferAhead = calculateBufferAhead(
-      element.currentTime,
-      buffered
-    );
-    const health = Math.min(bufferAhead / 10, 1); // 10 seconds = full health
-    
-    await send(mediaSignals.bufferUpdate({
-      ranges: buffered,
-      health
-    }), true).done();
-  }, 250); // Update 4 times per second
-}
+/** Reports the element's position and buffer to the player four times a second, until it is disposed. */
+class Ticker implements Disposable {
+  readonly #interval: ReturnType<typeof setInterval>;
 
-function stopProgressTracking() {
-  if (player.updateInterval) {
-    clearInterval(player.updateInterval);
-    player.updateInterval = undefined;
+  constructor(player: MediaPlayer) {
+    this.#interval = setInterval(() => void reportProgress(player), 250);
+  }
+
+  [Symbol.dispose](): void {
+    clearInterval(this.#interval);
   }
 }
 
-function calculateBufferAhead(
-  position: number,
-  ranges: Array<{ start: number; end: number }>
-): number {
-  for (const range of ranges) {
-    if (position >= range.start && position <= range.end) {
-      return range.end - position;
-    }
+async function reportProgress(player: MediaPlayer): Promise<void> {
+  const { buffered, currentTime } = player.element;
+  const ranges: Range[] = [];
+  for (let i = 0; i < buffered.length; i += 1) {
+    ranges.push({ start: buffered.start(i), end: buffered.end(i) });
   }
-  return 0;
+  const current = ranges.find((r) => currentTime >= r.start && currentTime <= r.end);
+  const health = Math.min((current === undefined ? 0 : current.end - currentTime) / 10, 1); // 10 s ahead is full health
+
+  // The lock queues these sends behind a pending transition; muted, they write no log entry.
+  await using send = await lock(player);
+  await send(mediaSignals.timeUpdate({ position: currentTime }), { mute: true }).done();
+  await send(mediaSignals.bufferUpdate({ ranges, health }), { mute: true }).done();
 }
 
-function createMediaPlayerLogger(): StateFlowLogHandler {
-  return (entry) => {
-    // A rejected result reliably stringifies as "Rejected: <message>", so that prefix is
-    // safe to match. An Error result, however, stringifies as String(error) (e.g.
-    // "TypeError: ...") — it is NOT prefixed with "Error", so `finalResult.includes("Error")`
-    // would both miss real errors and false-match any message that merely mentions "error".
-    // The log entry carries no ResultKind, so detect failures structurally: any handler whose
-    // recorded result is not an OK/Ignored marker is a problem. (If you have the Result in hand
-    // at the dispatch site, check `result.kind === ResultKind.Error` directly instead.)
-    const isRejected = entry.finalResult.startsWith("Rejected");
-    const hasFailedHandler = entry.handlerResults.some(
-      (h) => !/^(OK|Ignored)/.test(h.result)
-    );
-
-    const icon = hasFailedHandler && !isRejected ? "❌" :
-                 isRejected ? "⚠️" :
-                 entry.signal.includes("play") ? "▶️" :
-                 entry.signal.includes("pause") ? "⏸️" :
-                 entry.signal.includes("volume") ? "🔊" : "🎬";
-    
-    console.log(
-      `${icon} ${entry.signal} → ${entry.finalResult}`,
-      entry.stateChanges.length > 0 ? 
-        entry.stateChanges.map(c => `${c.stateName}: ${String(c.newState)}`) :
-        "No state changes"
-    );
-  };
+/** Resolves on `event`; rejects on the element's error event, or when `signal` aborts. */
+function waitForEvent(element: HTMLMediaElement, event: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      element.removeEventListener(event, onEvent);
+      element.removeEventListener("error", onError);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onEvent = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(element.error ?? new Error("media error"));
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    element.addEventListener(event, onEvent);
+    element.addEventListener("error", onError);
+    signal.addEventListener("abort", onAbort);
+  });
 }
+
+/** Logs each entry, with the handler results that did not succeed. */
+const mediaPlayerLog: StateFlowLogHandler = (entry) => {
+  const failures = entry.handlerResults.filter((h) => !/^(OK|Ignored)\b/.test(h.result));
+  console.log(entry.message, ...(failures.length > 0 ? [failures] : []));
+};
 ```
 
 ## Usage Examples
 
-The media player provides a clean API for common operations while maintaining state consistency.
-
 ```typescript
-// Load and play media. Acquire a lock so the signals queue: lock() drains any
-// in-flight transition for us, and `load` then `play` run in order even though each
-// drives an async transition.
-async function loadAndPlay(url: string) {
-  await using send = await lock(player);
+const player = new MediaPlayer(document.querySelector("video") as HTMLVideoElement);
 
-  await send(mediaSignals.load({ url, autoplay: true }))
-    .expect(ResultKind.OK, ResultKind.Ignored)
-    .done();
-  await send(mediaSignals.play())
-    .expect(ResultKind.OK, ResultKind.Ignored)
-    .done();
-  // lock released automatically at scope exit
+player.on("loaded", (duration: number) => console.log(`loaded, ${duration}s`));
+player.on("failed", (reason: string | null) => console.error("playback failed:", reason));
+
+// Load, then play, under one lock: the second send queues behind the first one's transition.
+async function loadAndPlay(url: string): Promise<void> {
+  await using send = await lock(player);
+  await send(mediaSignals.load({ url })).expect(ResultKind.OK).done();
+  await send(mediaSignals.play()).expect(ResultKind.OK).done();
 }
 
-// Seek with preview
-async function handleSeekStart() {
-  await using send = await lock(player);
-  await send(mediaSignals.startSeeking()).expect(ResultKind.OK, ResultKind.Ignored).done();
+// A pause while the element starts aborts the play: the abort skips the lock that the pending play holds.
+function handlePauseClick(): void {
+  dispatch(player, mediaSignals.pause(), { abort: true });
 }
 
-async function handleSeekDrag(position: number) {
+async function handleSeekDrag(position: number): Promise<void> {
   await using send = await lock(player);
-  await send(mediaSignals.seek({ position, preview: true }))
-    .expect(ResultKind.OK, ResultKind.Ignored)
-    .done();
+  send(mediaSignals.seek({ position, preview: true }));
 }
 
-async function handleSeekEnd(position: number) {
+async function handleSeekEnd(position: number): Promise<void> {
   await using send = await lock(player);
-  await send(mediaSignals.seek({ position })).expect(ResultKind.OK, ResultKind.Ignored).done();
-  await send(mediaSignals.endSeeking()).expect(ResultKind.OK, ResultKind.Ignored).done();
+  send(mediaSignals.seek({ position })).expect(ResultKind.OK);
 }
 
-// Volume control with keyboard
-async function handleVolumeKeys(event: KeyboardEvent) {
-  const current = player.volume.level;
+async function handleVolumeKeys(event: KeyboardEvent): Promise<void> {
   await using send = await lock(player);
-  
-  switch (event.key) {
-    case "ArrowUp":
-      await send(mediaSignals.setVolume({ level: Math.min(current + 0.1, 1) }))
-        .expect(ResultKind.OK, ResultKind.Ignored)
-        .done();
-      break;
-      
-    case "ArrowDown":
-      await send(mediaSignals.setVolume({ level: Math.max(current - 0.1, 0) }))
-        .expect(ResultKind.OK, ResultKind.Ignored)
-        .done();
-      break;
-      
-    case "m":
-      await send(mediaSignals.toggleMute()).expect(ResultKind.OK, ResultKind.Ignored).done();
-      break;
+  const level = player.volume.level;
+  if (event.key === "ArrowUp") {
+    send(mediaSignals.setVolume({ level: Math.min(level + 0.1, 1) }));
+  } else if (event.key === "ArrowDown") {
+    send(mediaSignals.setVolume({ level: Math.max(level - 0.1, 0) }));
+  } else if (event.key === "m") {
+    send(mediaSignals.toggleMute());
   }
 }
 
-// Error recovery
-function setupErrorRecovery() {
-  observe(
-    player,
-    [playbackState.error],
-    async (state) => {
-      console.error("Playback error:", state.lastError);
-      
-      // Auto-retry after 3 seconds for network errors
-      if (state.lastError?.message.includes("network")) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        await using send = await lock(player);
-        await send(mediaSignals.retry()).expect(ResultKind.OK, ResultKind.Ignored).done();
-      }
-    }
-  );
+// Retry a network failure after 3 seconds.
+using recovery = observe(player, [playbackState.error], async (state) => {
+  if (state.lastError?.includes("network")) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await using send = await lock(player);
+    await send(mediaSignals.retry()).done();
+  }
+});
+
+// Tear down: no exit handler runs, so the element is detached here; disposeFlow disposes the ticker.
+async function closePlayer(): Promise<void> {
+  disposeFlow(player);
+  player.element.removeAttribute("src");
+  await settled(player); // the events of the last commits have been emitted
 }
 ```
 
 ## Testing the Media Player
 
-StateFlow's predictable architecture makes testing straightforward. `createMediaPlayer` and `createMockVideoElement` below are illustrative test stubs that wire up a player against a fake `<video>` element.
+With every handler off, the player never touches its element, and a transition mock gives the element's answer where a test needs one. A declared transition without a mock has no work, so its next commits inside the send:
 
 ```typescript
-describe("Media Player", () => {
-  let player: MediaPlayerApp;
-  let mockElement: HTMLVideoElement;
-  
+describe("media player", () => {
+  let player: MediaPlayer;
+
   beforeEach(() => {
-    mockElement = createMockVideoElement();
-    player = createMediaPlayer(mockElement);
+    setHandlersDisabled(true);
+    player = new MediaPlayer({} as HTMLVideoElement);
   });
-  
-  it("should handle play/pause cycle", async () => {
-    // Acquire a lock so every signal queues behind the previous transition instead of
-    // throwing "States are in transitioning". The `loading` and `playing` enter handlers
-    // each return Result.transition, so their dispatches resolve as InTransition; awaiting
-    // .done() drains the transition before the next signal runs.
+
+  afterEach(() => {
+    setHandlersDisabled(false);
+  });
+
+  it("loads with the duration the element reports, then plays and pauses", async () => {
+    using mocks = mockHandlers(playbackState.ready, {
+      transition: async () => playbackState.ready.results.loaded({ duration: 120 }),
+    });
     await using send = await lock(player);
 
-    // Load media — idle -> loading (the loading enter handler runs an async transition)
-    await send(mediaSignals.load({ url: "test.mp4" })).done();
-    expect(player.playback[Symbol.toStringTag]).toBe("playback.loading");
+    // load declares a transition with work, the mock: loading commits at once.
+    const loading = send(mediaSignals.load({ url: "test.mp4" }));
+    expect(loading.kind).toBe(ResultKind.InTransition);
+    expect(stateVar(player.playback)).toBe(playbackState.loading);
 
-    // Buffer fills enough to become ready — loading -> ready
-    await send(mediaSignals.bufferUpdate({
-      ranges: [{ start: 0, end: 120 }],
-      health: 1
-    })).done();
-    expect(player.playback[Symbol.toStringTag]).toBe("playback.ready");
-
-    // Play — ready -> playing. The enter handler transitions, so the immediate result is
-    // InTransition; .done() resolves it to OK and commits the `playing` state.
-    const playResult = send(mediaSignals.play());
-    expect(playResult.kind).toBe(ResultKind.InTransition);
-    expect((await playResult.done()).kind).toBe(ResultKind.OK);
-    expect(player.playback[Symbol.toStringTag]).toBe("playback.playing");
-
-    // Pause — playing -> paused (synchronous, resolves OK)
-    const pauseResult = await send(mediaSignals.pause()).done();
-    expect(pauseResult.kind).toBe(ResultKind.OK);
-    expect(player.playback[Symbol.toStringTag]).toBe("playback.paused");
-  });
-  
-  it("should enforce volume constraints", async () => {
-    await using send = await lock(player);
-
-    // Valid volume (synchronous prop update — resolves OK)
-    const validResult = await send(mediaSignals.setVolume({ level: 0.5 })).done();
-    expect(validResult.kind).toBe(ResultKind.OK);
-    expect(player.volume.level).toBe(0.5);
-    
-    // Invalid volume — rejected, so don't .expect(OK) here; assert the kind directly
-    const invalidResult = await send(mediaSignals.setVolume({ level: 1.5 })).done();
-    expect(invalidResult.kind).toBe(ResultKind.Rejected);
-    expect(player.volume.level).toBe(0.5); // Unchanged
-  });
-  
-  it("should handle seek validation", async () => {
-    await using send = await lock(player);
-
-    // Load media, then let the buffer fill — bufferUpdate sets duration from the ranges
-    // (Math.max of range ends) and moves loading -> ready. State instances are frozen, so
-    // duration is set through the flow rather than by mutating player.playback directly.
-    await send(mediaSignals.load({ url: "test.mp4" })).done();
-    await send(mediaSignals.bufferUpdate({
-      ranges: [{ start: 0, end: 120 }],
-      health: 1
-    })).done();
+    expect((await loading.done()).kind).toBe(ResultKind.OK);
+    expect(stateVar(player.playback)).toBe(playbackState.ready);
     expect(player.playback.duration).toBe(120);
-    
-    // Valid seek (synchronous prop update — resolves OK)
-    const validSeek = await send(mediaSignals.seek({ position: 60 })).done();
-    expect(validSeek.kind).toBe(ResultKind.OK);
-    
-    // Invalid seek — rejected, so assert the kind directly rather than .expect(OK)
-    const invalidSeek = await send(mediaSignals.seek({ position: 150 })).done();
-    expect(invalidSeek.kind).toBe(ResultKind.Rejected);
+
+    // play has no work with every handler off: starting, then playing, inside the send.
+    expect(send(mediaSignals.play()).kind).toBe(ResultKind.OK);
+    expect(stateVar(player.playback)).toBe(playbackState.playing);
+
+    expect(send(mediaSignals.pause()).kind).toBe(ResultKind.OK);
+    expect(stateVar(player.playback)).toBe(playbackState.paused);
+  });
+
+  it("a refused play lands in paused, with the reason", async () => {
+    using mocks = mockHandlers(playbackState.playing, {
+      transition: async () => HandlerResult.rejected("autoplay refused"),
+    });
+    await using send = await lock(player);
+    await send(mediaSignals.load({ url: "test.mp4" })).done();
+
+    const playing = await send(mediaSignals.play()).done();
+
+    expect(playing.kind).toBe(ResultKind.Rejected);
+    expect(stateVar(player.playback)).toBe(playbackState.paused);
+    expect(player.playback.lastError).toBe("autoplay refused");
+  });
+
+  it("emits ended once playback reaches the end", async () => {
+    using mocks = mockHandlers(playbackState.ready, {
+      transition: async () => playbackState.ready.results.loaded({ duration: 120 }),
+    });
+    const ended = vi.fn();
+    player.on("ended", ended);
+
+    {
+      await using send = await lock(player);
+      await send(mediaSignals.load({ url: "test.mp4" })).done();
+      send(mediaSignals.play());
+      send(mediaSignals.timeUpdate({ position: 120 }));
+    }
+    await settled(player);
+
+    expect(stateVar(player.playback)).toBe(playbackState.ended);
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a volume out of range, and changes nothing", async () => {
+    await using send = await lock(player);
+
+    expect(send(mediaSignals.setVolume({ level: 0.5 })).kind).toBe(ResultKind.OK);
+    expect(send(mediaSignals.setVolume({ level: 1.5 })).kind).toBe(ResultKind.Rejected);
+    expect(player.volume.level).toBe(0.5);
+  });
+
+  it("a preview seek moves the preview, and the final seek the playback", async () => {
+    using mocks = mockHandlers(playbackState.ready, {
+      transition: async () => playbackState.ready.results.loaded({ duration: 120 }),
+    });
+    await using send = await lock(player);
+    await send(mediaSignals.load({ url: "test.mp4" })).done();
+    send(mediaSignals.showControls());
+    send(mediaSignals.startSeeking());
+
+    send(mediaSignals.seek({ position: 60, preview: true }));
+    expect(player.ui.seekPreview).toBe(60);
+    expect(player.playback.position).toBe(0);
+
+    send(mediaSignals.seek({ position: 60 }));
+    expect(stateVar(player.ui)).toBe(uiState.visible);
+    expect(player.playback.position).toBe(60);
   });
 });
 ```
-
-This media player example demonstrates how StateFlow's architecture provides a robust foundation for complex stateful applications. The combination of immutable states, controlled transitions through signals, and comprehensive feedback ensures that the player behaves predictably while maintaining consistency throughout its lifecycle.

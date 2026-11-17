@@ -24,9 +24,8 @@
     "declarationMap": true,
     "removeComments": true,
     "noEmit": true,
-    "rootDir": "src",
     "outDir": "dist"
   },
   // TypeScript's wildcards skip dot-directories, so "src" alone leaves out the specs in src/**/.tests.
-  "include": ["src", "src/**/.tests/*.ts"]
+  "include": ["src", "src/**/.tests/*.ts", "examples"]
 }

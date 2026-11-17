@@ -11,7 +11,8 @@ import blurIndigoImage from '@/images/blur-indigo.png'
 const codeLanguage = 'typescript'
 const code = `const userState = defineState<{ name: string; role: string }>()
   .name("user")
-  .variant("guest", true)
+  .signals(userSignals)
+  .variant("guest", { initial: true })
   .variant("authenticated")
   .build()
 

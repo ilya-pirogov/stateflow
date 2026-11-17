@@ -70,6 +70,7 @@
     "vitest": "^2.1.0"
   },
   "files": [
-    "dist"
+    "dist",
+    "agent-guide.md"
   ]
 }

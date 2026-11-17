@@ -9,6 +9,7 @@
     "ignoreUnknown": true,
     "includes": [
       "packages/*/src/**",
+      "packages/*/examples/**",
       "packages/*/*.ts",
       "packages/*/*.json",
       "*.json",

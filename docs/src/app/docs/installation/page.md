@@ -3,14 +3,14 @@ title: Installation
 description: Get started with StateFlow in your project
 ---
 
-StateFlow is designed to integrate seamlessly into modern TypeScript projects. This guide will walk you through installation, configuration, and your first setup. {% .lead %}
+Install the package, set up TypeScript, and run a first flow. {% .lead %}
 
 ## Package Installation
 
-StateFlow is available through npm and other package managers:
-
 {% callout type="note" %}
-StateFlow uses ES2023 explicit resource management (`using` / `await using`), so it requires TypeScript 5.2+ and a runtime that supports it (or appropriate transpilation). `Symbol.dispose` / `Symbol.asyncDispose` are polyfilled when missing.
+StateFlow's types need **TypeScript 5.6+**: the handler adders use `NoInfer` (5.4), and `Items` returns
+`MapIterator` (5.6). The package is built for ES2022 and polyfills `Symbol.dispose` and `Symbol.asyncDispose`, so it
+runs on Node.js 18+ and current browsers. Its only runtime dependency is `events`.
 {% /callout %}
 
 ### Using npm
@@ -33,276 +33,175 @@ pnpm add @state-flow/core
 
 ## TypeScript Configuration
 
-StateFlow leverages advanced TypeScript features for type safety. Ensure your `tsconfig.json` includes these settings:
+A `tsconfig.json` for an application that uses StateFlow:
 
 ```json
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
+    "module": "ESNext",
     "lib": ["ES2023", "ESNext.Disposable", "DOM"],
     "strict": true,
-    "exactOptionalPropertyTypes": true,
-    "noUncheckedIndexedAccess": true,
     "moduleResolution": "Bundler"
   }
 }
 ```
 
-`ESNext.Disposable` in `lib` is what enables the `using` / `await using` syntax, so keep it. The library itself is built with `target: "es2019"`; `ES2020` shown here is simply a safe default for consumers, set it to whatever your runtime supports. `DOM` is only needed for browser applications — omit it for Node-only projects.
-
-### Recommended Compiler Options
-
-- **`strict: true`** (required): Enables all strict type checking — this is the only option StateFlow itself requires (the library's own `tsconfig.json` sets just this).
-- **`exactOptionalPropertyTypes: true`** (optional): Prevents `undefined` assignment to optional properties. Best-practice, not required to consume the package.
-- **`noUncheckedIndexedAccess: true`** (optional): Adds `undefined` to unchecked index signatures. Best-practice, not required to consume the package.
+- **`strict: true`**: the library's sources and the examples on these pages compile under it.
+- **`ESNext.Disposable`** provides `Disposable`, `AsyncDisposable` and `Symbol.dispose`, which StateFlow's types and
+  the `using` / `await using` syntax of the examples need.
+- **`ES2022`** as the target matches the published bundle; a lower target needs a bundler that downlevels
+  dependencies too. `ESNext` modules allow the top-level `await` of the minimal example below.
+- **`DOM`** is for browser applications only.
 
 ## Framework Integration
 
-StateFlow works with any TypeScript application, but here are specific integration patterns for popular frameworks:
+StateFlow needs no adapter: a UI subscribes with `observe()` (or `watch()`, or an event of the flow) and sends
+signals through `lock()`. `observe()` checks its variants against the target's type, so each helper below names the
+state it watches. The helpers share an `app-state` module:
+
+```typescript
+// app-state.ts
+import { applyFlow, defineFlow, defineSignal, defineState, type Infer } from "@state-flow/core";
+
+export const signals = { play: defineSignal("play"), pause: defineSignal("pause") };
+
+export const playbackState = defineState<{ position: number }>()
+  .name("playback")
+  .signals(signals)
+  .variant("paused", { initial: true })
+  .variant("playing")
+  .build();
+
+defineFlow(playbackState.paused, { play: (p) => playbackState.playing(p) });
+defineFlow(playbackState.playing, { pause: (p) => playbackState.paused(p) });
+
+export type MyApp = { playback: Infer<typeof playbackState> };
+
+export function createApp(): MyApp {
+  const app: MyApp = { playback: { position: 0 } };
+  applyFlow(app, [playbackState], () => {});
+  return app;
+}
+```
 
 ### React Integration
 
-StateFlow integrates naturally with React through custom hooks:
+```tsx {% unchecked="needs React, which this repository does not install" %}
+import { useEffect, useState } from "react";
+import { isIn, lock, observe, type InstanceOf } from "@state-flow/core";
+import { playbackState, signals, type MyApp } from "./app-state";
 
-```typescript
-import { useState, useEffect } from 'react';
-import { observe, lock, stateVar } from '@state-flow/core';
-import type { StateVariant } from '@state-flow/core';
-import type { MyApp } from './app-state';
-import { playbackState, signals } from './app-state';
+type Playback = InstanceOf<typeof playbackState>;
 
-// `observe`'s handler receives a STATE INSTANCE (the immutable props snapshot),
-// and `compareFn` receives the PROPS. `StateInstance` is not exported, so we type
-// the hook around the props shape `T` — a state instance is assignable to it.
-function useStateFlow<T>(
-  app: MyApp,
-  states: StateVariant<T>[],
-  compareFn?: (prev: T, curr: T) => boolean
-) {
-  const [state, setState] = useState<T | null>(null);
+function usePlayback(app: MyApp): Playback | null {
+  const [playback, setPlayback] = useState<Playback | null>(null);
 
   useEffect(() => {
-    using observer = observe(app, states, setState, compareFn);
+    // Not `using`: that would dispose the observer as soon as this callback returns.
+    const observer = observe(app, [playbackState.playing, playbackState.paused], setPlayback);
     return () => observer[Symbol.dispose]();
-  }, [app, states, compareFn]);
+  }, [app]);
 
-  return state;
+  return playback;
 }
 
-// Usage in component
-function PlayerControls({ app }: { app: MyApp }) {
-  const playback = useStateFlow(
-    app,
-    [playbackState.playing, playbackState.paused],
-    (prev, curr) => prev.position !== curr.position
-  );
+export function PlayerControls({ app }: { app: MyApp }) {
+  const playback = usePlayback(app);
+  if (playback === null) {
+    return null;
+  }
 
-  if (!playback) return null;
-
-  const togglePlayback = async () => {
+  const toggle = async () => {
     await using send = await lock(app);
-    await send(signals.togglePlayback()).done();
+    await send(isIn(playback, "playing") ? signals.pause() : signals.play()).done();
   };
 
-  return (
-    <button onClick={togglePlayback}>
-      {String(stateVar(playback)) === 'playback.playing' ? 'Pause' : 'Play'}
-    </button>
-  );
+  return <button onClick={toggle}>{isIn(playback, "playing") ? "Pause" : "Play"}</button>;
 }
 ```
 
 ### Vue Integration
 
-Vue's reactivity system works well with StateFlow observers:
+```typescript {% unchecked="needs Vue, which this repository does not install" %}
+import { onUnmounted, ref } from "vue";
+import { observe, type InstanceOf } from "@state-flow/core";
+import { playbackState, type MyApp } from "./app-state";
 
-```typescript
-import { ref, onUnmounted } from 'vue';
-import { observe } from '@state-flow/core';
+export function usePlayback(app: MyApp) {
+  const playback = ref<InstanceOf<typeof playbackState> | null>(null);
 
-export function useStateFlow<T>(
-  app: MyApp,
-  states: StateVariant<T>[]
-) {
-  // observe() hands the handler a state instance (the props snapshot), not a variant.
-  const state = ref<T | null>(null);
-
-  const observer = observe(app, states, (newState) => {
-    state.value = newState;
+  const observer = observe(app, [playbackState.playing, playbackState.paused], (state) => {
+    playback.value = state;
   });
+  onUnmounted(() => observer[Symbol.dispose]());
 
-  onUnmounted(() => {
-    observer[Symbol.dispose]();
-  });
-
-  return state;
+  return playback;
 }
 ```
 
 ### Angular Integration
 
-Angular services provide a clean integration pattern:
+```typescript {% unchecked="needs Angular and RxJS, which this repository does not install" %}
+import { Injectable, type OnDestroy } from "@angular/core";
+import { BehaviorSubject } from "rxjs";
+import { observe, type InstanceOf } from "@state-flow/core";
+import { playbackState, type MyApp } from "./app-state";
 
-```typescript
-import { Injectable, OnDestroy } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
-import { observe } from '@state-flow/core';
+@Injectable({ providedIn: "root" })
+export class PlaybackService implements OnDestroy {
+  private readonly observers: Disposable[] = [];
 
-@Injectable({
-  providedIn: 'root'
-})
-export class StateFlowService implements OnDestroy {
-  private observers: Array<{ [Symbol.dispose](): void }> = [];
-
-  observeState<T>(
-    app: MyApp,
-    states: StateVariant<T>[]
-  ): BehaviorSubject<T | null> {
-    // observe() hands the handler a state instance (the props snapshot), not a variant.
-    const subject = new BehaviorSubject<T | null>(null);
-    
-    const observer = observe(app, states, (state) => {
-      subject.next(state);
-    });
-    
-    this.observers.push(observer);
+  observePlayback(app: MyApp): BehaviorSubject<InstanceOf<typeof playbackState> | null> {
+    const subject = new BehaviorSubject<InstanceOf<typeof playbackState> | null>(null);
+    this.observers.push(observe(app, [playbackState.playing, playbackState.paused], (state) => subject.next(state)));
     return subject;
   }
 
-  ngOnDestroy() {
-    this.observers.forEach(observer => observer[Symbol.dispose]());
+  ngOnDestroy(): void {
+    for (const observer of this.observers) {
+      observer[Symbol.dispose]();
+    }
   }
 }
 ```
 
-## Build Tool Configuration
+## Bundlers
 
-### Vite Setup
-
-StateFlow works out-of-the-box with Vite. For optimal performance, consider these configurations:
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite';
-
-export default defineConfig({
-  build: {
-    target: 'es2020'
-  },
-  optimizeDeps: {
-    include: ['@state-flow/core']
-  }
-});
-```
-
-### Webpack Configuration
-
-For Webpack projects, ensure proper module resolution:
-
-```javascript
-// webpack.config.js
-module.exports = {
-  resolve: {
-    extensions: ['.ts', '.js']
-  },
-  module: {
-    rules: [
-      {
-        test: /\.ts$/,
-        use: 'ts-loader',
-        exclude: /node_modules/
-      }
-    ]
-  }
-};
-```
-
-## Development Setup
-
-### ESLint Configuration
-
-Enhance your development experience with these ESLint rules:
-
-```json
-{
-  "extends": ["@typescript-eslint/recommended"],
-  "rules": {
-    "@typescript-eslint/no-explicit-any": "error",
-    "@typescript-eslint/prefer-readonly": "warn",
-    "@typescript-eslint/explicit-function-return-type": "warn"
-  }
-}
-```
-
-### IDE Integration
-
-For VS Code, install the TypeScript extension and add these settings:
-
-```json
-{
-  "typescript.preferences.strictFunctionTypes": true,
-  "typescript.preferences.strictNullChecks": true,
-  "typescript.preferences.noImplicitAny": true
-}
-```
+The package ships an ES module (`dist/index.mjs`), a CommonJS build (`dist/index.js`) and type declarations, all
+for ES2022. A bundler that targets ES2022 or later takes it as it is.
 
 ## First Steps Checklist
 
-{% callout type="installation" %}
-**Quick Start Checklist**
-
-1. ✅ Install StateFlow package
-2. ✅ Configure TypeScript with strict mode
-3. ✅ Set up your first state definition
-4. ✅ Define signal handlers with `defineFlow`
-5. ✅ Initialize with `applyFlow`
-6. ✅ Test signal dispatch and state transitions
-7. ✅ Add observers for UI updates
+{% callout type="note" title="Quick Start Checklist" %}
+1. Install the package
+2. Configure TypeScript 5.6+ with `strict` and `ESNext.Disposable`
+3. Define signals and a state
+4. Define its reducers with `defineFlow`
+5. Put it on a target with `applyFlow`, registering its handlers
+6. Send signals through `lock()`
+7. Observe the committed states for the UI
 {% /callout %}
 
 ## Minimal Working Example
 
-Here's a complete minimal setup to verify your installation:
-
 ```typescript
-// app.ts
-import { 
-  defineState, 
-  defineSignal, 
-  defineFlow, 
-  applyFlow, 
-  lock 
-} from '@state-flow/core';
+import { applyFlow, defineFlow, defineSignal, defineState, lock } from "@state-flow/core";
 
-// 1. Define signals
-const signals = {
-  increment: defineSignal("increment")
-};
+const signals = { increment: defineSignal("increment") };
 
-// 2. Define state
 const counterState = defineState<{ count: number }>()
   .name("counter")
   .signals(signals)
-  .variant("active", true)
-  .stringRepr(s => `count=${s.count}`)
+  .variant("active", { initial: true })
+  .stringRepr((s) => `count=${s.count}`)
   .build();
 
-// 3. Define flow
-defineFlow(counterState.active, {
-  increment: (state) => ({ count: state.count + 1 })
-});
+defineFlow(counterState.active, { increment: (s) => ({ count: s.count + 1 }) });
 
-// 4. Create application
-const app = {
-  counter: { count: 0 }
-};
+const app = { counter: { count: 0 } };
+applyFlow(app, [counterState], () => {});
 
-// 5. Apply flow
-applyFlow(app, [counterState], () => {
-  console.log('StateFlow initialized');
-});
-
-// 6. Test dispatch
 {
   await using send = await lock(app);
   await send(signals.increment()).done();
@@ -310,31 +209,18 @@ applyFlow(app, [counterState], () => {
 console.log(`${app.counter}`); // "counter.active(count=1)"
 ```
 
-Run this example to confirm StateFlow is working correctly in your environment.
-
 ## Troubleshooting
 
-### Common Issues
-
-**TypeScript Errors**: Ensure you're using TypeScript 5.2+ (required for `using` / explicit resource management) with strict mode enabled.
-
-**Module Resolution**: If you encounter import errors, check that your bundler supports ES2020 modules.
-
-**Runtime Errors**: Verify that all state variants have corresponding flow definitions before dispatching signals.
-
-### Getting Help
-
-If you encounter issues not covered here:
-
-1. Check the [Core Concepts](/docs/core-concepts) for fundamental understanding
-2. Review the [API Reference](/docs/api-reference) for detailed function signatures
-3. Examine the [Architecture Guide](/docs/architecture-guide) for complex application patterns
+- **Type errors in StateFlow's types**: TypeScript older than 5.6, or a `lib` without `ESNext.Disposable`.
+- **`State object <name> not found`** from `applyFlow`: the target holds no props under that state's name.
+- **`<target> doesn't contain state flows`**: a call on a target that `applyFlow` never set up.
+- **`Lock is held`** or **`A transition is pending`** from `dispatch()`: send through `lock()` instead.
+- **`Cannot dispatch to <name> from inside its own dispatch`**: a handler sent a signal to its own target; a
+  follow-up belongs to the same dispatch (see [Signal system](/docs/signal-system#follow-ups-belong-to-the-same-dispatch)).
 
 ## Next Steps
 
-Now that StateFlow is installed and configured, explore:
-
-- [Core Concepts](/docs/core-concepts) - Understand StateFlow's architecture
-- [Signal System](/docs/signal-system) - Learn advanced signal patterns  
-- [Media Player Example](/docs/media-player-example) - See a complete implementation
-- [Testing](/docs/testing) - Set up testing for your StateFlow application
+- [Core Concepts](/docs/core-concepts): the model, piece by piece
+- [Signal System](/docs/signal-system): signals, results and declared transitions
+- [Media Player Example](/docs/media-player-example): a complete application
+- [Testing](/docs/testing): simulation with handlers off, mocks and controlled time
