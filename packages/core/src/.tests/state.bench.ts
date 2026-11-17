@@ -6,7 +6,7 @@ import { applyFlow, Box, defineFlow, defineSignal, defineState, lock } from ".."
 const small = defineState<{ count: number }>()
   .name("small")
   .signals({ inc: defineSignal("inc") })
-  .variant("idle", true)
+  .variant("idle", { initial: true })
   .build();
 
 // (b) large nested POD (exercises the sealProps deep-freeze cost) -----------
@@ -17,7 +17,7 @@ interface Big {
 const big = defineState<Big>()
   .name("big")
   .signals({ noop: defineSignal("noop") })
-  .variant("idle", true)
+  .variant("idle", { initial: true })
   .build();
 const bigProps: Big = {
   meta: { a: 1, b: "x", nested: { x: [1, 2, 3, 4, 5], y: { p: 1, q: 2, r: 3 } } },
@@ -33,13 +33,23 @@ interface MediaLike {
 const media = defineState<MediaLike>()
   .name("media")
   .signals({ update: defineSignal("update") })
-  .variant("idle", true)
+  .variant("idle", { initial: true })
   .build();
 const mediaProps: MediaLike = {
   options: { polling: { intervalMs: 5000, enabled: true }, params: { a: "1", b: "2" } },
   meta: { type: "manifest", codecs: ["avc1.42e01f", "mp4a.40.2"] },
   qualities: Array.from({ length: 6 }, (_, i) => ({ name: `q${i}`, id: i })),
 };
+
+// (e) a shared frozen default reused by reference: the factory walks frozen data to refuse nested states inside it --
+const sharedDefault = Object.freeze({
+  list: Object.freeze(Array.from({ length: 20 }, (_, i) => Object.freeze({ id: i, name: `n${i}` }))),
+});
+const withDefault = defineState<{ count: number; config: typeof sharedDefault }>()
+  .name("withDefault")
+  .signals({ noop: defineSignal("noop") })
+  .variant("idle", { initial: true })
+  .build();
 
 describe("state construction", () => {
   bench("small POD", () => {
@@ -51,14 +61,17 @@ describe("state construction", () => {
   bench("realistic VDC-shaped", () => {
     media.idle(structuredClone(mediaProps));
   });
+  bench("shared frozen default of 20 objects", () => {
+    withDefault.idle({ count: 1, config: sharedDefault });
+  });
 });
 
 // (d) Box-wrapped construction — Box is skipped entirely by sealProps' freeze walk -----------
 class Live {}
 const boxed = defineState<{ handle: Box<Live> }>()
   .name("boxed")
-  .signals({ noop: defineSignal("noopB") })
-  .variant("idle", true)
+  .signals({ noop: defineSignal("noop") })
+  .variant("idle", { initial: true })
   .build();
 
 describe("state construction (boxed)", () => {
@@ -73,7 +86,11 @@ describe("state construction (boxed)", () => {
 // target up in an internal WeakMap populated by applyFlow). Registering once, outside the
 // timed callback, measures the steady-state round-trip cost rather than one-time setup.
 const setVol = defineSignal<{ v: number }>("setVol");
-const audio = defineState<{ volume: number }>().name("audio").signals({ setVol }).variant("playing", true).build();
+const audio = defineState<{ volume: number }>()
+  .name("audio")
+  .signals({ setVol })
+  .variant("playing", { initial: true })
+  .build();
 defineFlow(audio.playing, { setVol: (_s, a) => audio.playing({ volume: a.v }) });
 const player = { audio: audio.playing({ volume: 0 }) };
 applyFlow(player, [audio], () => {});

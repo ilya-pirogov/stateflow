@@ -13,7 +13,12 @@ describe("addGlobalLogHandler — global log-handler hook", () => {
     go: defineSignal("go"),
   };
 
-  const s = defineState<{ n: number }>().name("glb").signals(signals).variant("idle", true).variant("active").build();
+  const s = defineState<{ n: number }>()
+    .name("glb")
+    .signals(signals)
+    .variant("idle", { initial: true })
+    .variant("active")
+    .build();
 
   defineFlow(s.idle, {
     go: (state) => s.active({ n: state.n + 1 }),

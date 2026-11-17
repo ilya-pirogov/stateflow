@@ -27,5 +27,6 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"]
+  // TypeScript's wildcards skip dot-directories, so "src" alone leaves out the specs in src/**/.tests.
+  "include": ["src", "src/**/.tests/*.ts"]
 }

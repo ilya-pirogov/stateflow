@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { applyFlow, defineFlow, defineSignal, defineState, lock, setConsoleLogSilenced } from "..";
 import type { StateFlowLogEntry } from "../logger";
-import { Result } from "../result";
+import { HandlerResult, StateResult } from "../result";
 
 /**
  * `lock(target, label)` — an optional label adds one outer console-group level so all the
@@ -27,14 +27,17 @@ describe("lock(target, label) — grouped logging", () => {
   const s = defineState<{ n: number }>()
     .name("lbl")
     .signals(signals)
-    .variant("idle", true)
+    .variant("idle", { initial: true })
     .variant("active")
     .variant("loading")
+    .variant("loaded", { async: true })
+    .variant("failed")
     .build();
 
   defineFlow(s.idle, {
     go: (state) => s.active({ n: state.n + 1 }),
-    load: (state) => s.loading(state),
+    // A declared transition: loading commits at once, loaded when its work, loaded's transition handler, returns OK.
+    load: (state) => StateResult.transition(s.loaded(state), s.loading(state), s.failed(state), { timeoutMs: 1000 }),
   });
   defineFlow(s.active, {
     go: (state) => ({ n: state.n + 1 }),
@@ -75,12 +78,10 @@ describe("lock(target, label) — grouped logging", () => {
       app,
       [s],
       (sm) => {
-        sm.addEnterHandler(s.loading, () =>
-          Result.transition(async () => {
-            await Promise.resolve();
-            return Result.ok();
-          }, 1000),
-        );
+        sm.addTransitionHandler(s.loaded, async () => {
+          await Promise.resolve();
+          return HandlerResult.ok();
+        });
       },
       { logHandlers: [handler] },
     );
@@ -122,17 +123,18 @@ describe("lock(target, label) — grouped logging", () => {
     expect(entries.every((e) => e.groupLabel === "multi")).toBe(true);
   });
 
-  it("includes async-transition entries in the group", async () => {
+  it("includes both entries of a declared transition in the group", async () => {
     {
       await using send = await lock(app, "load request");
       await send(signals.load()).done();
     }
 
     expect(groupSpy).toHaveBeenCalledWith("load request");
-    const loadEntry = entries.find((e) => e.signal.startsWith("load"));
-    expect(loadEntry).toBeDefined();
-    expect(loadEntry?.isAsync).toBe(true);
-    expect(loadEntry?.groupLabel).toBe("load request");
+    expect(timeline).toEqual(["group:load request", "entry:load", "entry:load", "groupEnd"]);
+    expect(entries.map((e) => [e.transition, e.isAsync, e.groupLabel])).toEqual([
+      ["temp", false, "load request"],
+      ["final", true, "load request"],
+    ]);
   });
 
   it("opens no console group when the labeled lock dispatched nothing", async () => {

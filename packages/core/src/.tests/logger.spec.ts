@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { applyFlow, defineFlow, defineSignal, defineState, dispatch } from "..";
 import { createMockLogger } from "../logger-mock";
-import { Result, ResultKind } from "../result";
+import { HandlerResult, ResultKind } from "../result";
 
 describe("MockStateFlowLogger", () => {
   const signals = {
@@ -13,7 +13,7 @@ describe("MockStateFlowLogger", () => {
   const testState = defineState<{ count: number }>()
     .name("test")
     .signals(signals)
-    .variant("initial", true)
+    .variant("initial", { initial: true })
     .variant("active")
     .build();
 
@@ -34,15 +34,15 @@ describe("MockStateFlowLogger", () => {
     context = { test: { count: 0 } };
     logger = createMockLogger();
 
-    function enderActiveHandler(state: { count: number }): Result {
+    function enderActiveHandler(state: { count: number }): HandlerResult {
       if (state.count > 10) {
-        return Result.reject("count too high");
+        return HandlerResult.rejected("count too high");
       }
-      return Result.ok();
+      return HandlerResult.ok();
     }
 
-    function updateActiveHandler(state: { count: number }): Result {
-      return Result.ignore("noting to do");
+    function updateActiveHandler(state: { count: number }): HandlerResult {
+      return HandlerResult.ignored("noting to do");
     }
 
     applyFlow(
@@ -60,7 +60,7 @@ describe("MockStateFlowLogger", () => {
     logger.clear();
   });
 
-  it("should track successful state transitions", async () => {
+  it("a committed dispatch logs OK, its signal, the change of variant and the enter handler's result", async () => {
     await dispatch(context, signals.next({ value: 5 })).done();
 
     logger.should
@@ -70,7 +70,7 @@ describe("MockStateFlowLogger", () => {
       .haveHandler(testState, "enter", "enderActiveHandler", "OK");
   });
 
-  it("should track rejected transitions", async () => {
+  it("a dispatch a reducer rejects logs its Rejected result and the reducer's message", async () => {
     await dispatch(context, signals.next({ value: 15 })).done();
 
     logger.should
@@ -79,7 +79,7 @@ describe("MockStateFlowLogger", () => {
       .haveMessage("count too high");
   });
 
-  it("should track multiple transitions", async () => {
+  it("the log keeps every dispatch: the first one's change of variant and the second one's update handler are both found", async () => {
     await dispatch(context, signals.next({ value: 5 })).done();
     await dispatch(context, signals.next({ value: 3 })).done();
 
@@ -94,5 +94,11 @@ describe("MockStateFlowLogger", () => {
 
     // After clearing, no logs should exist
     expect(() => logger.should.haveResult(ResultKind.OK)).toThrow();
+  });
+
+  it("haveHandler on an empty log fails with its own message", () => {
+    expect(() => logger.should.haveHandler(testState, "enter", "enderActiveHandler")).toThrow(
+      'Expected to find enter handler "enderActiveHandler" for "test"',
+    );
   });
 });

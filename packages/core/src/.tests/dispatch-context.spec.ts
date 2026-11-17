@@ -28,7 +28,12 @@ describe("lock(target, label) — dispatch context capture", () => {
     finish: defineSignal("finish"),
   };
 
-  const s = defineState<{ n: number }>().name("dcx").signals(signals).variant("idle", true).variant("active").build();
+  const s = defineState<{ n: number }>()
+    .name("dcx")
+    .signals(signals)
+    .variant("idle", { initial: true })
+    .variant("active")
+    .build();
 
   defineFlow(s.idle, {
     go: (state) => s.active({ n: state.n + 1 }),

@@ -6,16 +6,11 @@ import { describe, expect, it } from "vitest";
 import { dispatch, lock } from "../flow";
 
 /**
- * P0.B — Deprecate bare dispatch().
- *
- * dispatch() stays EXPORTED (two documented, genuinely-safe exception sites exist in
- * consumers: synchronous page-unload teardown and pre-lock constructor bootstrap), but
- * its JSDoc must steer all other code to lock()+send(). These are source-level guards:
- * the only thing this task changes is documentation metadata, so we assert on the
- * @deprecated marker and the corrected guidance rather than runtime behavior (which is
- * intentionally unchanged).
+ * Bare dispatch() is deprecated. It stays exported for two safe uses (synchronous page-unload teardown and
+ * pre-lock bootstrap), and its JSDoc steers all other code to lock()+send(). These guards read the source, so
+ * they pin the @deprecated marker and the guidance, not runtime behavior.
  */
-describe("dispatch() deprecation (P0.B)", () => {
+describe("dispatch() deprecation", () => {
   // Read the engine source directly so the assertion is on the shipped JSDoc, not a
   // runtime side effect. flow.ts sits next to this spec in src/.
   const flowSrc = readFileSync(fileURLToPath(new URL("../flow.ts", import.meta.url)), "utf8");
@@ -52,10 +47,8 @@ describe("dispatch() deprecation (P0.B)", () => {
     expect(dispatchDoc).toMatch(/bootstrap/i);
   });
 
-  it("primary JSDoc example no longer presents bare dispatch() as the pattern to copy", () => {
-    // The old example led with `const result = dispatch(player, signals.play())` as the
-    // primary, copy-this pattern. After deprecation the example must lead with
-    // lock()+send() instead.
+  it("primary JSDoc example does not present bare dispatch() as the pattern to copy", () => {
+    // The example leads with lock()+send(), not with `const result = dispatch(player, signals.play())`.
     expect(dispatchDoc).not.toMatch(/const\s+result\s*=\s*dispatch\(player,\s*signals\.play\(\)\)/);
   });
 });

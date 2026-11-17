@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { defineSignal, defineState, StateFlowError } from "..";
 import { Box } from "../box";
-import { FrozenSet } from "../collections";
+import { FrozenMap, FrozenSet } from "../collections";
 
 const noop = defineSignal("noop");
 
 function build<T>(props: T) {
-  const st = defineState<T>().name("t").signals({ noop }).variant("idle", true).build();
+  const st = defineState<T>().name("t").signals({ noop }).variant("idle", { initial: true }).build();
   return st.idle(props);
 }
 
@@ -48,5 +48,47 @@ describe("sealProps", () => {
     class Live {}
     expect(() => build({ inst: new Live() })).toThrow(StateFlowError);
     expect(() => build({ inst: new Live() })).toThrow(/Box\(/);
+  });
+
+  describe("nested states inside data", () => {
+    const part = defineState<{ n: number }>().name("part").variant("on", { initial: true }).build();
+    const inst = part.on({ n: 1 });
+    const items = part.items().with("a", inst);
+
+    it("accepts an instance or an Items held directly in a prop: a nested state", () => {
+      expect(() => build({ one: inst, many: items })).not.toThrow();
+    });
+
+    it("refuses an instance or an Items inside an array, a plain object, a FrozenMap or a FrozenSet, frozen or not", () => {
+      const holders: Array<[string, (x: object) => unknown]> = [
+        ["an array", (x) => [x]],
+        ["a frozen array", (x) => Object.freeze([x])],
+        ["a plain object", (x) => ({ deep: { x } })],
+        ["a frozen plain object", (x) => Object.freeze({ deep: Object.freeze({ x }) })],
+        ["a FrozenMap value", (x) => new FrozenMap([["k", x]])],
+        ["a FrozenMap key", (x) => new FrozenMap([[x, 1]])],
+        ["a FrozenSet element", (x) => new FrozenSet([x])],
+      ];
+      for (const [label, hold] of holders) {
+        for (const nested of [inst, items]) {
+          expect(() => build({ data: hold(nested) }), `${label}, ${String(nested)}`).toThrow(StateFlowError);
+          expect(() => build({ data: hold(nested) }), `${label}, ${String(nested)}`).toThrow(
+            `State prop \`data\` holds ${String(nested)} inside its data; a nested state goes directly in a prop`,
+          );
+        }
+      }
+    });
+
+    it("refuses one inside a shared frozen default, and a FrozenMap of instances", () => {
+      const sharedDefault = Object.freeze({
+        list: Object.freeze([Object.freeze({ id: 1 }), Object.freeze({ part: inst })]),
+      });
+      expect(() => build({ config: sharedDefault })).toThrow(`holds ${String(inst)} inside its data`);
+      expect(() => build({ members: new FrozenMap([["a", inst]]) })).toThrow(`holds ${String(inst)} inside its data`);
+    });
+
+    it("does not walk a Box's content", () => {
+      expect(() => build({ handle: Box.of({ part: inst, items: [items] }) })).not.toThrow();
+    });
   });
 });

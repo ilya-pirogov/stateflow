@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, type MockedFunction, vi } from "vitest";
 
 import { applyFlow, dispatch, lock, observe } from "../flow";
-import { Result, ResultKind } from "../result";
+import { HandlerResult, ResultKind, StateResult } from "../result";
 import { defineSignal } from "../signal";
 import { defineFlow, defineState, isState } from "../state";
 
@@ -27,11 +27,11 @@ describe("State Flow System", () => {
       reset: defineSignal("reset"),
     };
 
-    it("should create valid state definition", () => {
+    it("build() gives a definition named by .name() with a factory per variant", () => {
       const state = defineState<{ counter: number }>()
         .name("test")
         .signals(signals)
-        .variant("initial", true)
+        .variant("initial", { initial: true })
         .variant("running")
         .stringRepr((s) => `count=${s.counter}`)
         .build();
@@ -41,11 +41,11 @@ describe("State Flow System", () => {
       expect(typeof state.running).toBe("function");
     });
 
-    it("should validate state definition requirements", () => {
+    it("build() throws without a name or without a variant", () => {
       expect(() => defineState<{ counter: number }>().signals(signals).build()).toThrow("Name was not provided");
 
       const partial = defineState<{ counter: number }>().name("test");
-      expect(() => partial.build()).toThrow("Signals were not provided");
+      expect(() => partial.build()).toThrow("No state variants are defined");
 
       const withSignals = partial.signals(signals);
       expect(() => withSignals.build()).toThrow("No state variants are defined");
@@ -53,7 +53,11 @@ describe("State Flow System", () => {
 
     it("should not allow multiple initial variants", () => {
       expect(() =>
-        defineState<{ counter: number }>().name("test").signals(signals).variant("first", true).variant("second", true),
+        defineState<{ counter: number }>()
+          .name("test")
+          .signals(signals)
+          .variant("first", { initial: true })
+          .variant("second", { initial: true }),
       ).toThrow("Only one initial state variant is allowed");
     });
   });
@@ -71,18 +75,18 @@ describe("State Flow System", () => {
       testState = defineState<{ counter: number }>()
         .name("test")
         .signals(signals)
-        .variant("initial", true)
+        .variant("initial", { initial: true })
         .variant("running")
         .build();
     });
 
-    it("should define valid flow handlers", () => {
+    it("a variant's reducers are defined once: a second defineFlow for it throws", () => {
       defineFlow(testState.initial, {
         next: (state: any, signal: any) => testState.running({ counter: signal.value }),
         reset: () => testState.initial({ counter: 0 }),
       });
 
-      // Verify handlers are frozen after definition
+      // Verify reducers are frozen after definition
       expect(() =>
         defineFlow(testState.initial, {
           next: () => testState.running({ counter: 0 }),
@@ -108,7 +112,7 @@ describe("State Flow System", () => {
       testState = defineState<{ counter: number }>()
         .name("test")
         .signals(signals)
-        .variant("initial", true)
+        .variant("initial", { initial: true })
         .variant("running")
         .build();
 
@@ -116,9 +120,9 @@ describe("State Flow System", () => {
         test: { counter: 0 },
       };
 
-      enterSpy = vi.fn(() => Result.ok());
-      exitSpy = vi.fn(() => Result.ok());
-      updateSpy = vi.fn(() => Result.ok());
+      enterSpy = vi.fn(() => HandlerResult.ok());
+      exitSpy = vi.fn(() => HandlerResult.ok());
+      updateSpy = vi.fn(() => HandlerResult.ok());
 
       defineFlow(testState.initial, {
         next: (state: any, signal: any) => testState.running({ counter: signal.value }),
@@ -137,7 +141,7 @@ describe("State Flow System", () => {
       });
     });
 
-    it("should handle synchronous state transitions", () => {
+    it("a reducer that returns another variant's instance commits it at once, with the old variant's exit and the new one's enter", () => {
       const result = dispatch(context, signals.next({ value: 5 }));
 
       expect(result.kind).toBe(ResultKind.OK);
@@ -146,7 +150,7 @@ describe("State Flow System", () => {
       expect(exitSpy).toHaveBeenCalledOnce();
     });
 
-    it("should handle state updates", () => {
+    it("a reducer that returns props keeps the variant, commits them and runs its update handler", () => {
       dispatch(context, signals.next({ value: 5 }));
       const result = dispatch(context, signals.next({ value: 3 }));
 
@@ -155,7 +159,7 @@ describe("State Flow System", () => {
       expect(updateSpy).toHaveBeenCalledOnce();
     });
 
-    it("should handle reset", () => {
+    it("a reducer that returns the initial variant's instance commits it with its props", () => {
       dispatch(context, signals.next({ value: 5 }));
       const result = dispatch(context, signals.reset());
 
@@ -179,25 +183,30 @@ describe("State Flow System", () => {
       testState = defineState<{ delay: number }>()
         .name("test")
         .signals(signals)
-        .variant("idle", true)
+        .variant("idle", { initial: true })
         .variant("loading")
-        .variant("done")
+        .variant("done", { async: true })
+        .variant("failed")
         .build();
 
       context = {
         test: { delay: 0 },
       };
 
+      // The reducer declares the transition: loading commits at once, done or failed when the work ends.
       defineFlow(testState.idle, {
-        async: (state: any, signal: any) => testState.loading({ delay: signal.delay }),
+        async: (state: any, signal: any) =>
+          StateResult.transition(
+            testState.done({ delay: signal.delay }),
+            testState.loading({ delay: signal.delay }),
+            testState.failed({ delay: signal.delay }),
+          ),
       });
 
       applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.loading, (state: any) => {
-          return Result.transition(async () => {
-            await new Promise((resolve) => setTimeout(resolve, state.delay));
-            return Result.ok();
-          });
+        sm.addTransitionHandler(testState.done, async (state: any) => {
+          await new Promise((resolve) => setTimeout(resolve, state.delay));
+          return HandlerResult.ok();
         });
       });
     });
@@ -206,29 +215,35 @@ describe("State Flow System", () => {
       vi.useRealTimers();
     });
 
-    it("should handle async transitions", async () => {
+    it("a declared transition commits temp at once and next when the work resolves OK", async () => {
       const result = dispatch(context, signals.async({ delay: 100 }));
       expect(result.kind).toBe(ResultKind.InTransition);
+      expect(String(context.test)).toBe("test.loading(delay=100)");
 
       vi.advanceTimersByTime(100);
       const final = await result.done();
 
       expect(final.kind).toBe(ResultKind.OK);
-      expect(String(context.test)).toBe("test.loading(delay=100)");
+      expect(String(context.test)).toBe("test.done(delay=100)");
     });
 
-    it("should prevent concurrent transitions", () => {
+    it("a bare dispatch while a transition is pending throws", () => {
       dispatch(context, signals.async({ delay: 100 }));
-      expect(() => dispatch(context, signals.async({ delay: 100 }))).toThrow("States are in transitioning");
+      expect(() => dispatch(context, signals.async({ delay: 100 }))).toThrow("A transition is pending");
     });
 
-    it("should handle transition timeouts", async () => {
+    it("the default 500 ms timeout commits failed with a TransitionAborted of kind timeout naming the path and the variant", async () => {
       const result = dispatch(context, signals.async({ delay: 1000 }));
       vi.advanceTimersByTime(501); // Default timeout is 500ms
 
       const final = await result.done();
       expect(final.kind).toBe(ResultKind.Error);
-      expect(final.error?.message).toBe("timeout");
+      expect(final.error).toMatchObject({
+        kind: "timeout",
+        message:
+          "test did not reach test.done within 500 ms [SF035] Make the work answer sooner or raise timeoutMs; release what it acquired on abort.",
+      });
+      expect(String(context.test)).toBe("test.failed(delay=1000)");
     });
   });
 
@@ -243,7 +258,11 @@ describe("State Flow System", () => {
         update: defineSignal<{ value: number }>("update"),
       };
 
-      testState = defineState<{ value: number }>().name("test").signals(signals).variant("active", true).build();
+      testState = defineState<{ value: number }>()
+        .name("test")
+        .signals(signals)
+        .variant("active", { initial: true })
+        .build();
 
       context = {
         test: { value: 0 },
@@ -279,6 +298,40 @@ describe("State Flow System", () => {
       expect(observerSpy).not.toHaveBeenCalled();
     });
 
+    it("disposing an observer stops only that observer: another observe() with the same callback on the same variant is still told", async () => {
+      const first = observe(context, [testState.active], observerSpy);
+      using _second = observe(context, [testState.active], observerSpy);
+
+      first[Symbol.dispose]();
+      dispatch(context, signals.update({ value: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 1));
+
+      expect(observerSpy).toHaveBeenCalledOnce();
+    });
+
+    it("one observe() takes the variants of several top-level states and is told of each change", async () => {
+      const ping = defineSignal("ping");
+      const left = defineState<{ n: number }>().name("left").signals({ ping }).variant("a", { initial: true }).build();
+      const right = defineState<{ m: number }>()
+        .name("right")
+        .signals({ ping })
+        .variant("a", { initial: true })
+        .build();
+      defineFlow(left.a, { ping: (s) => ({ n: s.n + 1 }) });
+      defineFlow(right.a, { ping: (s) => ({ m: s.m + 1 }) });
+      const target = { left: { n: 0 }, right: { m: 0 } };
+      applyFlow(target, [left, right], () => {});
+      const seen: string[] = [];
+      using _ = observe(target, [left.a, right.a], (state) => {
+        seen.push(String(state));
+      });
+
+      dispatch(target, ping());
+      await new Promise((resolve) => setTimeout(resolve, 1));
+
+      expect(seen).toEqual(["left.a(n=1)", "right.a(m=1)"]);
+    });
+
     it("should only notify when compare function returns true", async () => {
       using _ = observe(context, [testState.active], observerSpy, (prev: any, curr: any) => prev.value > curr.value);
 
@@ -289,62 +342,100 @@ describe("State Flow System", () => {
       expect(observerSpy).toHaveBeenCalledOnce();
       expect((observerSpy.mock.calls[0][0] as any).value).toBe(0);
     });
-  });
 
-  describe("Result Handling", () => {
-    it("should handle OK results", () => {
-      const result = Result.ok("test");
-      expect(result.kind).toBe(ResultKind.OK);
-      expect(result.data).toBe("test");
+    it("observers are told after every state of the commit is set: a compare on one state reads the other state's new instance on the target", () => {
+      const ping = defineSignal("ping");
+      const left = defineState<{ n: number }>().name("left").signals({ ping }).variant("a", { initial: true }).build();
+      const right = defineState<{ n: number }>()
+        .name("right")
+        .signals({ ping })
+        .variant("a", { initial: true })
+        .build();
+      defineFlow(left.a, { ping: (s) => ({ n: s.n + 1 }) });
+      defineFlow(right.a, { ping: (s) => ({ n: s.n + 1 }) });
+      const target = { left: { n: 0 }, right: { n: 0 } };
+      applyFlow(target, [left, right], () => {});
+      const seen: string[] = [];
+      using _ = observe(
+        target,
+        [left.a],
+        () => {},
+        () => {
+          seen.push(String(target.right));
+          return true;
+        },
+      );
+
+      dispatch(target, ping());
+
+      expect(seen).toEqual(["right.a(n=1)"]);
     });
 
-    it("should handle Error results", () => {
-      const error = new Error("test error");
-      const result = Result.error(error);
-      expect(result.kind).toBe(ResultKind.Error);
-      expect(result.error).toBe(error);
+    it("an observer whose callback throws breaks nothing: the other observers are still told, and console.error reports it", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const thrown = new Error("callback boom");
+        using _failing = observe(context, [testState.active], function failing() {
+          throw thrown;
+        });
+        using _ = observe(context, [testState.active], observerSpy);
+
+        expect(dispatch(context, signals.update({ value: 1 })).kind).toBe(ResultKind.OK);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+
+        expect(observerSpy).toHaveBeenCalledOnce();
+        expect(error).toHaveBeenCalledWith("[SF/Object] observer failing on test.active threw:", thrown);
+      } finally {
+        error.mockRestore();
+      }
     });
 
-    it("should handle Ignored results", () => {
-      const result = Result.ignore("not applicable");
-      expect(result.kind).toBe(ResultKind.Ignored);
-      expect(result.message).toBe("not applicable");
-    });
+    it("takes a nested state's variant, which fires with the node's path, and a variant of a state outside the flow, which never fires", async () => {
+      const part = defineState<{ n: number }>().name("part").variant("on", { initial: true }).build();
+      const outside = defineState<{ n: number }>().name("outside").variant("on", { initial: true }).build();
+      const holder = defineState<{ part: ReturnType<typeof part.on> }>()
+        .name("holder")
+        .signals(signals)
+        .variant("x", { initial: true })
+        .build();
+      defineFlow(holder.x, { update: (_h: unknown, signal: any) => ({ part: part.on({ n: signal.value }) }) });
+      const target = { holder: { part: part.on({ n: 0 }) } };
+      applyFlow(target, [holder], () => {});
 
-    it("should handle Rejected results", () => {
-      const result = Result.reject("invalid state");
-      expect(result.kind).toBe(ResultKind.Rejected);
-      expect(result.message).toBe("invalid state");
-    });
+      using _nested = observe(target, [part.on], observerSpy);
+      // Cast, as a loosely typed target would pass it: the variant's type refuses it. At run time a nested state that
+      // no node holds yet cannot be told from it, so observe() takes it.
+      using _outside = observe(target, [outside.on] as never, observerSpy);
 
-    it("should merge results correctly", () => {
-      const r1 = Result.ok("first");
-      const r2 = Result.ok("second");
-      const merged = r1.merge(r2);
-      expect(merged.kind).toBe(ResultKind.OK);
-
-      const r3 = Result.error(new Error("test"));
-      const r4 = Result.ok("test");
-      const errorMerged = r3.merge(r4);
-      expect(errorMerged.kind).toBe(ResultKind.Error);
+      dispatch(target, signals.update({ value: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      expect(observerSpy.mock.calls).toEqual([[target.holder.part, "holder.part"]]);
     });
   });
 
   describe("Utility Functions", () => {
     it("should detect state instances", () => {
-      const state = defineState<{ value: number }>().name("test").signals({}).variant("test", true).build();
+      const state = defineState<{ value: number }>()
+        .name("test")
+        .signals({})
+        .variant("test", { initial: true })
+        .build();
 
       const instance = state.test({ value: 0 });
       expect(isState(instance)).toBe(true);
       expect(isState({})).toBe(false);
     });
 
-    it("should truncate long values correctly", () => {
+    it("a string within the 25-character limit prints whole in an instance's string form", () => {
       const signals = {
         test: defineSignal<{ value: string }>("test"),
       };
 
-      const state = defineState<{ value: string }>().name("test").signals(signals).variant("test", true).build();
+      const state = defineState<{ value: string }>()
+        .name("test")
+        .signals(signals)
+        .variant("test", { initial: true })
+        .build();
 
       const longString = "a".repeat(20);
       const instance = state.test({ value: longString });
@@ -366,7 +457,7 @@ describe("State Flow System", () => {
       testState = defineState<{ counter: number }>()
         .name("test")
         .signals(signals)
-        .variant("initial", true)
+        .variant("initial", { initial: true })
         .variant("running")
         .build();
 
@@ -448,13 +539,11 @@ describe("State Flow System", () => {
       expect(() => send(signals.next({ value: 5 }))).toThrow("Lock has been released");
     });
 
-    it("handles many concurrent lock() acquisitions without invalidating handles (race regression)", async () => {
-      // Mirrors the driver support-check: N independent async callbacks each acquire
-      // the same target's lock as their work resolves. The previous FIFO hand-off
-      // nulled lockHolder before the woken waiter resumed, leaving a window where a
-      // racing lock() could claim it and invalidate the woken waiter's handle
-      // ("Lock has been released"). Each task yields a varying number of microtasks
-      // before locking to maximize interleaving across the hand-off window.
+    it("a released lock passes straight to the next waiter: many concurrent lock() calls never invalidate a woken waiter's handle", async () => {
+      // N independent async callbacks each acquire the same target's lock as their work resolves. A hand-off that
+      // nulled lockHolder before the woken waiter resumed would leave a window where a racing lock() claims it and
+      // invalidates the woken waiter's handle ("Lock has been released"). Each task yields a varying number of
+      // microtasks before locking to maximize interleaving across the hand-off window.
       const N = 25;
       const errors: unknown[] = [];
       const tasks = Array.from({ length: N }, (_, i) =>
@@ -494,22 +583,27 @@ describe("State Flow System", () => {
       testState = defineState<{ delay: number }>()
         .name("test")
         .signals(signals)
-        .variant("idle", true)
+        .variant("idle", { initial: true })
         .variant("loading")
+        .variant("loaded", { async: true })
+        .variant("failed")
         .build();
 
       context = { test: { delay: 0 } };
 
       defineFlow(testState.idle, {
-        start: (state: any, signal: any) => testState.loading({ delay: signal.delay }),
+        start: (state: any, signal: any) =>
+          StateResult.transition(
+            testState.loaded({ delay: signal.delay }),
+            testState.loading({ delay: signal.delay }),
+            testState.failed({ delay: signal.delay }),
+          ),
       });
 
       applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.loading, (state: any) => {
-          return Result.transition(async () => {
-            await new Promise((resolve) => setTimeout(resolve, state.delay));
-            return Result.ok();
-          });
+        sm.addTransitionHandler(testState.loaded, async (state: any) => {
+          await new Promise((resolve) => setTimeout(resolve, state.delay));
+          return HandlerResult.ok();
         });
       });
     });
@@ -523,427 +617,20 @@ describe("State Flow System", () => {
       const result = send(signals.start({ delay: 100 }));
       expect(result.kind).toBe(ResultKind.InTransition);
 
-      vi.advanceTimersByTime(100);
-
+      let disposed = false;
       // dispose waits for transition to complete
-      await send[Symbol.asyncDispose]();
+      const disposing = send[Symbol.asyncDispose]().then(() => {
+        disposed = true;
+      });
+      await vi.advanceTimersByTimeAsync(99);
+      expect(disposed).toBe(false);
 
-      // lock released, can dispatch again
+      await vi.advanceTimersByTimeAsync(1);
+      await disposing;
+
+      // lock released and the transition ended, so a bare dispatch reaches the reducers again
+      expect(String(context.test)).toBe("test.loaded(delay=100)");
       expect(() => dispatch(context, signals.start({ delay: 50 }))).not.toThrow();
-    });
-  });
-
-  describe("Result.enqueue", () => {
-    let context: any;
-    let testState: any;
-    let signals: any;
-
-    beforeEach(() => {
-      signals = {
-        activate: defineSignal("activate"),
-        update: defineSignal<{ value: number }>("update"),
-        fail: defineSignal("fail"),
-      };
-
-      testState = defineState<{ counter: number }>()
-        .name("test")
-        .signals(signals)
-        .variant("idle", true)
-        .variant("active")
-        .build();
-
-      context = { test: { counter: 0 } };
-    });
-
-    it("should chain enqueued signal after dispatch", () => {
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 1 }),
-        update: (state: any, signal: any) => testState.active({ counter: signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          return Result.enqueue(signals.update({ value: 10 }));
-        });
-      });
-
-      const result = dispatch(context, signals.activate());
-      expect(result.kind).toBe(ResultKind.OK);
-      // activate -> active(counter=1), then enqueued update(10) -> active(counter=11)
-      expect(context.test.counter).toBe(11);
-    });
-
-    it("should chain multiple enqueued signals in order", () => {
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          return Result.enqueue(signals.update({ value: 5 }));
-        });
-        sm.addUpdateHandler(testState.active, () => {
-          return Result.ok();
-        });
-      });
-
-      const result = dispatch(context, signals.activate());
-      expect(result.kind).toBe(ResultKind.OK);
-      // activate -> active(0), enqueue update(5) -> active(5)
-      expect(context.test.counter).toBe(5);
-    });
-
-    it("should handle nested enqueue (enqueued handler also enqueues)", () => {
-      let updateCount = 0;
-
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          return Result.enqueue(signals.update({ value: 5 }));
-        });
-        sm.addUpdateHandler(testState.active, () => {
-          updateCount++;
-          // only enqueue once to avoid infinite loop
-          if (updateCount === 1) {
-            return Result.enqueue(signals.update({ value: 3 }));
-          }
-          return Result.ok();
-        });
-      });
-
-      const result = dispatch(context, signals.activate());
-      expect(result.kind).toBe(ResultKind.OK);
-      // activate -> active(0), enqueue update(5) -> active(5), enqueue update(3) -> active(8)
-      expect(context.test.counter).toBe(8);
-    });
-
-    it("should display enqueued signals in Result string representation", () => {
-      const signal = signals.update({ value: 10 });
-      const result = Result.enqueue(signal);
-
-      expect(result.kind).toBe(ResultKind.OK);
-      expect(result.enqueuedSignals).toHaveLength(1);
-      expect(String(result)).toContain("Enqueue(");
-    });
-  });
-
-  describe("Multi-Handler Enqueue Warning (warn-only guard)", () => {
-    let context: any;
-    let testState: any;
-    let signals: any;
-    let warnSpy: MockedFunction<typeof console.warn>;
-
-    beforeEach(() => {
-      signals = {
-        activate: defineSignal("activate"),
-        update: defineSignal<{ value: number }>("update"),
-        fail: defineSignal("fail"),
-      };
-
-      testState = defineState<{ counter: number }>()
-        .name("test")
-        .signals(signals)
-        .variant("idle", true)
-        .variant("active")
-        .build();
-
-      context = { test: { counter: 0 } };
-      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {}) as MockedFunction<typeof console.warn>;
-    });
-
-    afterEach(() => {
-      warnSpy.mockRestore();
-    });
-
-    it("warns when two DIFFERENT handlers each enqueue a signal in one dispatch cycle", () => {
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        // exit-from-idle AND enter-to-active BOTH fire in the idle->active cycle,
-        // and BOTH enqueue — the genuinely-forbidden two-different-handler co-enqueue.
-        sm.addExitHandler(testState.idle, () => Result.enqueue(signals.update({ value: 1 })));
-        sm.addEnterHandler(testState.active, () => Result.enqueue(signals.update({ value: 2 })));
-      });
-
-      const result = dispatch(context, signals.activate());
-
-      expect(result.kind).toBe(ResultKind.OK);
-      // The warning must have been emitted at least once.
-      expect(warnSpy).toHaveBeenCalled();
-      const warnedAtLeastOnceAboutEnqueue = warnSpy.mock.calls.some((args) =>
-        args.some((arg) => typeof arg === "string" && /enqueue/i.test(arg)),
-      );
-      expect(warnedAtLeastOnceAboutEnqueue).toBe(true);
-    });
-
-    it("does NOT warn for a self-terminating nested record chain (single enqueue per cycle) and still works", () => {
-      // Mirror of flow.spec.ts "should handle nested enqueue" — one enqueue per cycle.
-      let updateCount = 0;
-
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: state.counter + signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          return Result.enqueue(signals.update({ value: 5 }));
-        });
-        sm.addUpdateHandler(testState.active, () => {
-          updateCount++;
-          if (updateCount === 1) {
-            return Result.enqueue(signals.update({ value: 3 }));
-          }
-          return Result.ok();
-        });
-      });
-
-      const result = dispatch(context, signals.activate());
-
-      expect(result.kind).toBe(ResultKind.OK);
-      // activate -> active(0), enqueue update(5) -> active(5), enqueue update(3) -> active(8)
-      expect(context.test.counter).toBe(8);
-      // The blessed self-terminating chain enqueues at most ONE signal per cycle: no warning.
-      expect(warnSpy).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("Full Rollback on Enqueue Failure", () => {
-    let context: any;
-    let testState: any;
-    let signals: any;
-
-    beforeEach(() => {
-      signals = {
-        activate: defineSignal("activate"),
-        update: defineSignal<{ value: number }>("update"),
-        fail: defineSignal("fail"),
-      };
-
-      testState = defineState<{ counter: number }>()
-        .name("test")
-        .signals(signals)
-        .variant("idle", true)
-        .variant("active")
-        .build();
-
-      context = { test: { counter: 0 } };
-    });
-
-    it("should rollback to pre-chain state when enqueued signal fails", () => {
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 1 }),
-        update: (state: any, signal: any) => ({ counter: signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          // enqueue a signal that will cause the fail handler to reject
-          return Result.enqueue(signals.fail());
-        });
-        sm.addExitHandler(testState.active, () => {
-          return Result.reject("intentional failure in exit handler");
-        });
-      });
-
-      const result = dispatch(context, signals.activate());
-      // activate -> active(1), then enqueue fail() -> should try to exit active
-      // exit handler rejects -> full rollback to idle(counter=0)
-      expect(result.kind).toBe(ResultKind.Rejected);
-      expect(context.test.counter).toBe(0);
-      expect(String(context.test)).toContain("idle");
-    });
-
-    it("should rollback to pre-chain state with lock", async () => {
-      defineFlow(testState.idle, {
-        activate: () => testState.active({ counter: 1 }),
-        update: (state: any, signal: any) => ({ counter: signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      defineFlow(testState.active, {
-        activate: () => testState.active({ counter: 0 }),
-        update: (state: any, signal: any) => ({ counter: signal.value }),
-        fail: () => testState.idle({ counter: 0 }),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.active, () => {
-          return Result.enqueue(signals.fail());
-        });
-        sm.addExitHandler(testState.active, () => {
-          return Result.reject("intentional failure");
-        });
-      });
-
-      await using send = await lock(context);
-      const result = send(signals.activate());
-
-      expect(result.kind).toBe(ResultKind.Rejected);
-      expect(context.test.counter).toBe(0);
-      expect(String(context.test)).toContain("idle");
-    });
-  });
-
-  describe("Result.enqueue inside Result.transition", () => {
-    let context: any;
-    let testState: any;
-    let signals: any;
-
-    beforeEach(() => {
-      signals = {
-        start: defineSignal("start"),
-        asyncStep: defineSignal("asyncStep"),
-        followUp: defineSignal<{ value: number }>("followUp"),
-      };
-
-      testState = defineState<{ counter: number }>()
-        .name("test")
-        .signals(signals)
-        .variant("idle", true)
-        .variant("loading")
-        .variant("ready")
-        .build();
-
-      context = { test: { counter: 0 } };
-    });
-
-    it("should process enqueued signal after async transition resolves", async () => {
-      defineFlow(testState.idle, {
-        start: () => testState.loading({ counter: 0 }),
-        followUp: (s: any, a: any) => testState.ready({ counter: a.value }),
-      });
-
-      defineFlow(testState.loading, {
-        followUp: (s: any, a: any) => testState.ready({ counter: a.value }),
-      });
-
-      defineFlow(testState.ready, {});
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.loading, () => {
-          return Result.transition(async () => {
-            // Simulate async work
-            await new Promise((r) => setTimeout(r, 10));
-            // Enqueue a follow-up signal after async completes
-            return Result.enqueue(signals.followUp({ value: 42 }));
-          });
-        });
-      });
-
-      await using send = await lock(context);
-      const result = await send(signals.start()).done();
-
-      // start → loading(0), async transition resolves,
-      // enqueued followUp(42) → ready(42)
-      expect(result.kind).toBe(ResultKind.OK);
-      expect(context.test.counter).toBe(42);
-      expect(String(context.test)).toContain("ready");
-    });
-
-    it("should process enqueued signal from sync transition returning enqueue", async () => {
-      defineFlow(testState.idle, {
-        start: () => testState.loading({ counter: 0 }),
-        followUp: (s: any, a: any) => testState.ready({ counter: a.value }),
-      });
-
-      defineFlow(testState.loading, {
-        followUp: (s: any, a: any) => testState.ready({ counter: a.value }),
-      });
-
-      defineFlow(testState.ready, {});
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.loading, () => {
-          return Result.transition(async () => {
-            return Result.enqueue(signals.followUp({ value: 99 }));
-          });
-        });
-      });
-
-      await using send = await lock(context);
-      const result = await send(signals.start()).done();
-
-      expect(result.kind).toBe(ResultKind.OK);
-      expect(context.test.counter).toBe(99);
-      expect(String(context.test)).toContain("ready");
-    });
-
-    it("should rollback enqueued-from-transition signal on failure", async () => {
-      defineFlow(testState.idle, {
-        start: () => testState.loading({ counter: 0 }),
-        followUp: () => Result.reject("intentional reject"),
-      });
-
-      defineFlow(testState.loading, {
-        followUp: () => Result.reject("intentional reject"),
-      });
-
-      applyFlow(context, [testState], (sm) => {
-        sm.addEnterHandler(testState.loading, () => {
-          return Result.transition(async () => {
-            return Result.enqueue(signals.followUp({ value: 1 }));
-          });
-        });
-      });
-
-      await using send = await lock(context);
-      const result = await send(signals.start()).done();
-
-      // start → loading, transition resolves, enqueued followUp rejected → rollback
-      expect(result.kind).toBe(ResultKind.Rejected);
-      expect(context.test.counter).toBe(0);
-      expect(String(context.test)).toContain("idle");
     });
   });
 });

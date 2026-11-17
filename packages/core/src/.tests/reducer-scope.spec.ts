@@ -13,7 +13,7 @@ describe("reducer-scope", () => {
 
   it("is true inside a reducer and restored after", async () => {
     let seenInside = false;
-    const s = defineState<{ n: number }>().name("s").signals({ ping }).variant("idle", true).build();
+    const s = defineState<{ n: number }>().name("s").signals({ ping }).variant("idle", { initial: true }).build();
     defineFlow(s.idle, {
       ping: (state) => {
         seenInside = isInReducer();
@@ -28,8 +28,8 @@ describe("reducer-scope", () => {
     expect(isInReducer()).toBe(false);
   });
 
-  it("throws when a reducer dispatches, surfacing as Result.error", async () => {
-    const s = defineState<{ n: number }>().name("s2").signals({ boom }).variant("idle", true).build();
+  it("a dispatch inside a reducer throws, and the dispatch that ran the reducer is refused with an Error result", async () => {
+    const s = defineState<{ n: number }>().name("s2").signals({ boom }).variant("idle", { initial: true }).build();
     defineFlow(s.idle, {
       boom: (state) => {
         // Illegal: dispatching from inside a reducer.

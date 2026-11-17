@@ -48,7 +48,11 @@ describe("Box", () => {
 
   it("deref throws inside a reducer, works in effects and observers", async () => {
     const bump = defineSignal("bump");
-    const st = defineState<{ box: Box<MediaStream> }>().name("hasbox").signals({ bump }).variant("idle", true).build();
+    const st = defineState<{ box: Box<MediaStream> }>()
+      .name("hasbox")
+      .signals({ bump })
+      .variant("idle", { initial: true })
+      .build();
     let reducerThrew = false;
     let effectSaw: MediaStream | null = null;
     defineFlow(st.idle, {

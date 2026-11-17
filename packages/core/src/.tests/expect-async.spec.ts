@@ -1,20 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { applyFlow, dispatch } from "../flow";
-import { Result, ResultKind } from "../result";
+import { HandlerResult, ResultKind, StateResult } from "../result";
 import { defineSignal } from "../signal";
 import { defineFlow, defineState } from "../state";
 
 /**
- * Regression suite for P0.A: `expect().done()` must actually enforce on async
- * (InTransition) results that flow through `dispatch` (i.e. carry `meta`).
- *
- * The proven bug: `await dispatch(...).expect(ResultKind.OK).done()` on a
- * transition resolving Rejected returned (threw=false, finalKind=Rejected,
- * unhandledRejections=1) — the assertion parked on a side-promise was orphaned
- * because `done()` returned `meta.transitioning` without consulting it.
+ * `expect()` on the pending result a dispatch returns while its declared transition runs is enforced by `done()`:
+ * an end of another kind makes done() throw, and no unhandled rejection is left behind (an assertion parked on a
+ * side promise that done() never reads would leave one and let the end pass).
  */
-describe("expect() on async dispatch transitions (P0.A)", () => {
+describe("expect() on async dispatch transitions", () => {
   // Capture unhandled rejections during the test body, restore afterwards.
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown): void => {
@@ -34,7 +30,8 @@ describe("expect() on async dispatch transitions (P0.A)", () => {
 
   type Ctx = { test: { n: number } };
 
-  function makeContext(transitionResult: () => Promise<Result>): {
+  /** A target whose `go` declares loaded through loading, with failed, and `work` as loaded's transition handler. */
+  function makeContext(work: () => Promise<HandlerResult>): {
     context: Ctx;
     signals: { go: () => any };
   } {
@@ -45,30 +42,39 @@ describe("expect() on async dispatch transitions (P0.A)", () => {
     const testState = defineState<{ n: number }>()
       .name("test")
       .signals(signals)
-      .variant("idle", true)
+      .variant("idle", { initial: true })
       .variant("loading")
+      .variant("loaded", { async: true })
+      .variant("failed")
       .build();
 
     const context: Ctx = { test: { n: 0 } };
 
     defineFlow(testState.idle, {
-      go: (() => testState.loading({ n: 1 })) as any,
+      go: () =>
+        StateResult.transition(testState.loaded({ n: 1 }), testState.loading({ n: 1 }), testState.failed({ n: 1 }), {
+          timeoutMs: 200,
+        }),
     });
 
     applyFlow(context, [testState], (sm) => {
-      sm.addEnterHandler(testState.loading, () => Result.transition(transitionResult, 200));
+      sm.addTransitionHandler(testState.loaded, work);
     });
 
     return { context, signals };
   }
 
-  it("expect(OK).done() on a transition resolving Rejected REJECTS and leaks no unhandledRejection", async () => {
-    const { context, signals } = makeContext(async () => Result.reject("nope"));
+  it("expect(OK).done() on a declared transition whose work rejects REJECTS once and leaks no unhandledRejection", async () => {
+    const { context, signals } = makeContext(async () => HandlerResult.rejected("nope"));
+
+    // Pending first: otherwise a synchronous Error would also make expect(OK) throw inside the try below.
+    const r = dispatch(context, signals.go());
+    expect(r.kind).toBe(ResultKind.InTransition);
 
     let threw = false;
     let finalKind: ResultKind | null = null;
     try {
-      const final = await dispatch(context, signals.go()).expect(ResultKind.OK).done();
+      const final = await r.expect(ResultKind.OK).done();
       finalKind = final.kind;
     } catch {
       threw = true;
@@ -82,8 +88,8 @@ describe("expect() on async dispatch transitions (P0.A)", () => {
     expect(unhandled).toHaveLength(0);
   });
 
-  it("expect(OK).done() on a transition resolving OK resolves OK", async () => {
-    const { context, signals } = makeContext(async () => Result.ok());
+  it("expect(OK).done() on a declared transition whose work resolves OK resolves OK", async () => {
+    const { context, signals } = makeContext(async () => HandlerResult.ok());
 
     const final = await dispatch(context, signals.go()).expect(ResultKind.OK).done();
 
@@ -92,18 +98,19 @@ describe("expect() on async dispatch transitions (P0.A)", () => {
     expect(unhandled).toHaveLength(0);
   });
 
-  it("expect(OK, Ignored).done() multi-kind accepts a transition resolving Ignored", async () => {
-    const { context, signals } = makeContext(async () => Result.ignore("skipped"));
+  it("expect(OK, Ignored).done() multi-kind accepts a work resolving Ignored, which reaches next", async () => {
+    const { context, signals } = makeContext(async () => HandlerResult.ignored("skipped"));
 
     const final = await dispatch(context, signals.go()).expect(ResultKind.OK, ResultKind.Ignored).done();
 
     expect(final.in(ResultKind.OK, ResultKind.Ignored)).toBe(true);
+    expect(String(context.test)).toBe("test.loaded(n=1)");
     await new Promise((r) => setTimeout(r, 0));
     expect(unhandled).toHaveLength(0);
   });
 
-  it("expect(OK, Rejected).done() multi-kind accepts a transition resolving Rejected (no throw)", async () => {
-    const { context, signals } = makeContext(async () => Result.reject("expected"));
+  it("expect(OK, Rejected).done() multi-kind accepts a work resolving Rejected (no throw)", async () => {
+    const { context, signals } = makeContext(async () => HandlerResult.rejected("expected"));
 
     const final = await dispatch(context, signals.go()).expect(ResultKind.OK, ResultKind.Rejected).done();
 
@@ -113,7 +120,7 @@ describe("expect() on async dispatch transitions (P0.A)", () => {
   });
 
   it("sync: expect(OK) on a synchronous Rejected result still throws synchronously", () => {
-    const result = Result.reject("sync reject");
+    const result = StateResult.rejected("sync reject");
     expect(() => result.expect(ResultKind.OK)).toThrow();
   });
 });

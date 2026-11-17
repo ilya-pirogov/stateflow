@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FROZEN } from "../symbols";
+import { defineState } from "../state";
 import { isImmutableValueLike, serializeDebug } from "../utils";
 
 describe("serializeDebug", () => {
@@ -216,6 +216,24 @@ describe("serializeDebug", () => {
       const regex = /test/gi;
       expect(serializeDebug({ pattern: regex })).toBe("pattern=/test/gi");
     });
+
+    it("prints a nested state instance and an Items by their string form, and the instance itself by its props", () => {
+      const port = defineState<{ open: boolean }>().name("port").variant("up", { initial: true }).build();
+      const box = defineState<{ id: number; port: ReturnType<typeof port.up>; spares: ReturnType<typeof port.items> }>()
+        .name("box")
+        .variant("on", { initial: true })
+        .build();
+      const inst = box.on({
+        id: 1,
+        port: port.up({ open: true }),
+        spares: port.items().with("a", port.up({ open: false })),
+      });
+
+      // A single-prop instance is not flattened like plain data: it prints whole, with its variant.
+      expect(serializeDebug(inst)).toBe("id=1 port=port.up(open=T) spares=Items(1){a=port.up(open=F)}");
+      expect(String(inst)).toBe("box.on(id=1 port=port.up(open=T) spares=Items(1){a=port.up(open=F)})");
+      expect(serializeDebug({ list: [port.up({ open: true })] })).toBe("list=[port.up(open=T)]");
+    });
   });
 
   describe("String truncation", () => {
@@ -238,27 +256,27 @@ describe("serializeDebug", () => {
   });
 
   describe("Edge cases", () => {
-    it("should handle empty objects", () => {
+    it("prints an empty object as an empty string", () => {
       expect(serializeDebug({})).toBe("");
     });
 
-    it("should handle empty arrays", () => {
+    it("prints an empty array as []", () => {
       expect(serializeDebug({ arr: [] })).toBe("arr=[]");
     });
 
-    it("should handle objects with only null values", () => {
+    it("prints each null value as N", () => {
       expect(serializeDebug({ a: null, b: null })).toBe("a=N b=N");
     });
 
-    it("should handle mixed types in arrays", () => {
+    it("prints each member of an array by its own type: T for true, N for null, an object by its props", () => {
       expect(serializeDebug({ mixed: [1, "two", true, null, { id: 5 }] })).toBe("mixed=[1 two T N id=5]");
     });
 
-    it("should handle nested empty objects", () => {
+    it("prints a nested empty object as {} after its dotted path", () => {
       expect(serializeDebug({ outer: { inner: {} } })).toBe("outer.inner={}");
     });
 
-    it("should handle circular-like deep nesting", () => {
+    it("prints what lies deeper than maxDepth (3 by default) as {...}", () => {
       const deep = { a: { b: { c: { d: { e: { f: "deep" } } } } } };
       expect(serializeDebug(deep)).toBe("a.b.c={...}");
     });
@@ -382,12 +400,6 @@ describe("isImmutableValueLike", () => {
     expect(isImmutableValueLike(/re/)).toBe(true);
     expect(isImmutableValueLike(new UrlStandIn())).toBe(true);
     expect(isImmutableValueLike(new FooEvent())).toBe(true);
-    expect(isImmutableValueLike(Object.freeze({ a: 1 }))).toBe(true);
-    // FROZEN-branded value (what FrozenSet/FrozenMap carry): isolate the brand branch with an
-    // un-frozen branded object so this asserts the brand path, not the Object.isFrozen path.
-    const branded = {};
-    Object.defineProperty(branded, FROZEN, { value: true, enumerable: false });
-    expect(isImmutableValueLike(branded)).toBe(true);
   });
 
   it("rejects mutable / non-value-like inputs", () => {
