@@ -1,0 +1,462 @@
+{
+  "SF001": {
+    "message": "Cannot deref a Box inside a reducer; read it in a handler (enter, exit, update, transition or commit) or an observer.",
+    "cause": "A reducer called deref() on a Box. Reducers are pure, and a Box holds a live resource.",
+    "fix": "Read the Box in a handler or an observer; give the reducer what it needs as payload or props."
+  },
+  "SF002": {
+    "message": "Items of <definition>: a map takes with(key, item)",
+    "cause": "with() on Items that are a map got one argument.",
+    "fix": "Call with(key, item) on a map of items."
+  },
+  "SF003": {
+    "message": "Items of <definition>: a keyed set takes with(item) and keys it itself",
+    "cause": "with() on Items that are a keyed set got a key as well as the item.",
+    "fix": "Call with(item); the set's key function gives the key."
+  },
+  "SF004": {
+    "message": "Items of <definition> take its instances only, not <value>",
+    "cause": "with() got a value that is not an instance of the definition the Items were made of.",
+    "fix": "Pass an instance of that definition, made by one of its variants."
+  },
+  "SF005": {
+    "message": "FrozenSet is immutable; build a new FrozenSet instead of mutating.",
+    "cause": "add, delete or clear was called on a FrozenSet held in state props.",
+    "fix": "Build a new FrozenSet with the change and return it in the next props."
+  },
+  "SF006": {
+    "message": "FrozenMap is immutable; build a new FrozenMap instead of mutating.",
+    "cause": "set, delete or clear was called on a FrozenMap held in state props.",
+    "fix": "Build a new FrozenMap with the change and return it in the next props."
+  },
+  "SF007": {
+    "message": "<target> doesn't contain state flows",
+    "cause": "A flow call got an object applyFlow never ran on.",
+    "fix": "Call applyFlow(target, states, initializer) on the object before using it."
+  },
+  "SF008": {
+    "message": "<flow> is disposed",
+    "cause": "A call reached a flow after disposeFlow: an Error from dispatch, lock or a read, a Rejected result from the send of a lock taken before.",
+    "fix": "Stop using the object after disposeFlow; make a new one."
+  },
+  "SF009": {
+    "message": "Incorrect state definition",
+    "cause": "The states given to applyFlow hold something that is not a state definition.",
+    "fix": "List only definitions made by defineState()...build()."
+  },
+  "SF010": {
+    "message": "State object <name> not found",
+    "cause": "The object given to applyFlow has no property named after one of its states.",
+    "fix": "Give the object a property with the state's name holding its initial props."
+  },
+  "SF011": {
+    "message": "<path> starts in a transitional variant, which commits only as the temp of a declared transition",
+    "cause": "The initial instance, or the one FlowConfig.start gives, holds a variant marked transitional.",
+    "fix": "Start in a variant that is not transitional."
+  },
+  "SF012": {
+    "message": "<path> starts in <variant>, whose entry is asynchronous; declare a transition into it",
+    "cause": "A nested state of the initial instance would enter a variant marked async, which only a declared transition enters.",
+    "fix": "Start in a synchronous variant and enter this one with StateResult.transition."
+  },
+  "SF013": {
+    "message": "<flow> has no emit method, which defineEvent(\"<event>\") needs",
+    "cause": "The initializer defined an event on an object that has no emit method.",
+    "fix": "Give the object an emit(name, payload) method, or drop the event."
+  },
+  "SF014": {
+    "message": "<state> and <state> both declare a result named <name>; every state with a result reducer of that name takes it, so one state of a flow declares it",
+    "cause": "Two state definitions of one flow declare a named result of the same name.",
+    "fix": "Rename one of the results, or declare it on one state only."
+  },
+  "SF015": {
+    "message": "Cannot dispatch from inside a reducer",
+    "cause": "A reducer called dispatch or a lock's send. Reducers are pure.",
+    "fix": "Return the change from the reducer; send from a handler or from outside the flow."
+  },
+  "SF016": {
+    "message": "Cannot dispatch to <flow> from inside its own dispatch",
+    "cause": "A handler, observer or tap sent to the object whose step is running.",
+    "fix": "Return a named result from the handler, or send after the dispatch returns."
+  },
+  "SF017": {
+    "message": "nothing to abort: no transition is pending and the lock is held",
+    "cause": "A Rejected result: an abort was sent while no transition was pending and another caller held the lock.",
+    "fix": "Expect it when an abort may race a transition's end; otherwise send without abort."
+  },
+  "SF018": {
+    "message": "Lock is held. Use `await using send = await lock(target)` for queued access",
+    "cause": "dispatch was called while another caller held the object's lock.",
+    "fix": "Take the lock with await lock(target) and send through it."
+  },
+  "SF019": {
+    "message": "A transition is pending on <flow>; use lock() to queue, or { abort: true }",
+    "cause": "dispatch was called while a declared transition's work was running.",
+    "fix": "Send through lock() to queue behind it, or send with { abort: true } to end it."
+  },
+  "SF020": {
+    "message": "Lock has been released",
+    "cause": "A lock's send was called after the lock was released.",
+    "fix": "Send only inside the lock's scope; take a new lock for a later operation."
+  },
+  "SF021": {
+    "message": "<path> would be left in <variant>, a transitional variant, which commits only as the temp of a declared transition",
+    "cause": "A reducer's next leaves a node in a variant marked transitional.",
+    "fix": "Return that variant as the temp of StateResult.transition, or another variant as next."
+  },
+  "SF022": {
+    "message": "<path>: its failed <instance> would leave <path> in a transitional variant",
+    "cause": "The failed a reducer declared would leave a node in a variant marked transitional.",
+    "fix": "Declare a failed that holds no transitional variant."
+  },
+  "SF023": {
+    "message": "<path> replaced or removed <path>, whose own reducer also answered",
+    "cause": "A reducer replaced or removed a nested state whose own reducer answered the same signal, so two answers would decide it.",
+    "fix": "Keep the nested state in the parent's answer, or let only one of the two reducers answer."
+  },
+  "SF024": {
+    "message": "<path> enters <variant>, whose entry is asynchronous; declare a transition",
+    "cause": "A reducer's next enters a variant marked async without declaring a transition.",
+    "fix": "Return StateResult.transition(next, temp, failed) to enter it."
+  },
+  "SF025": {
+    "message": "<path> enters <variant>, whose entry is asynchronous, <where>; declare a transition",
+    "cause": "A failed step or a transition's failed end would enter a variant marked async.",
+    "fix": "Declare a failed whose variants are synchronous."
+  },
+  "SF026": {
+    "message": "<place> holds <box> <where>, which the temp drops from <place>; the temp's commit disposes it",
+    "cause": "An end of a transition holds a DisposableBox the temp leaves out, and the temp's commit disposes it.",
+    "fix": "Keep the box in the temp too, or give the end a new box."
+  },
+  "SF027": {
+    "message": "<place> and <place> hold <box> <where>; a DisposableBox has one place in the states",
+    "cause": "One DisposableBox stands in two places of the states a step would commit.",
+    "fix": "Keep each DisposableBox in one prop; move it rather than copy it."
+  },
+  "SF028": {
+    "message": "<place> holds <box> <where>, which the engine disposed already",
+    "cause": "A step would commit a DisposableBox the engine disposed when a state dropped it.",
+    "fix": "Make a new box for the resource instead of reusing the disposed one."
+  },
+  "SF029": {
+    "message": "<the refusal of the failed step>",
+    "cause": "A handler of the failed step, or a result reducer folding into it, refused. A failed step commits whatever its handlers answer, so the refusal is an Error of the result.",
+    "fix": "Make the failed variant's handlers succeed; report trouble there through state, not a refusal."
+  },
+  "SF030": {
+    "message": "<where> answered for <path>, which this step changes already; two answers would decide one state",
+    "cause": "A result reducer of another state answered for a node the step changes already.",
+    "fix": "Let one of the two decide that node: drop the result reducer's change or the step's."
+  },
+  "SF031": {
+    "message": "<where> answered for a node the transition of <path> decides at its next or failed; two answers would decide one state",
+    "cause": "A result reducer answered for a node that a pending transition's next or failed decides.",
+    "fix": "Fold the result into the transition's next and failed, or into a node outside them."
+  },
+  "SF032": {
+    "message": "<where> would leave <path> in a transitional variant, which commits only as the temp of a declared transition",
+    "cause": "A result reducer's answer leaves a node in a variant marked transitional.",
+    "fix": "Return a variant that is not transitional from the result reducer."
+  },
+  "SF033": {
+    "message": "<where>: <path> enters <variant>, whose entry is asynchronous; declare a transition",
+    "cause": "A result reducer's answer enters a variant marked async, which only a declared transition enters.",
+    "fix": "Enter that variant through a signal reducer that returns StateResult.transition."
+  },
+  "SF034": {
+    "message": "failed: <the refusal that ended the transition>",
+    "cause": "The reason of a transition's AbortSignal (TransitionAborted of kind failed): a handler refused, or the end step did not commit.",
+    "fix": "Read the refusal in the message; stop the work and release what it acquired."
+  },
+  "SF035": {
+    "message": "<path> did not reach <variant> within <timeoutMs> ms",
+    "cause": "A transition's work outlasted its timeoutMs (TransitionAborted of kind timeout); the failed end committed.",
+    "fix": "Make the work answer sooner or raise timeoutMs; release what it acquired on abort."
+  },
+  "SF036": {
+    "message": "an abort of <path> is already in progress",
+    "cause": "A Rejected result: an abort was sent while another abort of the same transition was waiting for its work.",
+    "fix": "Send one abort per transition and wait for its result."
+  },
+  "SF037": {
+    "message": "<signal> changes nothing; the transition continues",
+    "cause": "A Rejected result: an abort's reducers ignored it or changed nothing, so the transition goes on.",
+    "fix": "Give the abort signal a reducer on the transition's temp that changes the state."
+  },
+  "SF038": {
+    "message": "<the abort reducer's refusal>; the transition continues",
+    "cause": "A Rejected result: a reducer rejected the abort signal, so the transition goes on.",
+    "fix": "Expect it where the abort may be refused, or let the reducer accept the abort."
+  },
+  "SF039": {
+    "message": "<the abort reducer's error>; the transition continues",
+    "cause": "A reducer of the abort signal threw or broke a rule, so the transition goes on. The reducer's error is its cause.",
+    "fix": "Fix the reducer's error named in the message."
+  },
+  "SF040": {
+    "message": "aborted by <signal>",
+    "cause": "An abort was accepted: the transition's AbortSignal reason (TransitionAborted of kind aborted), and the Rejected outcome of the aborted send.",
+    "fix": "Stop the work on abort and release what it acquired; expect Rejected where an abort may come."
+  },
+  "SF041": {
+    "message": "flow disposed during the abort of <path>",
+    "cause": "disposeFlow ran while an accepted abort waited for its work.",
+    "fix": "Expect it when the object may be disposed during an abort."
+  },
+  "SF042": {
+    "message": "Cannot dispose a flow from inside a reducer",
+    "cause": "A reducer called disposeFlow. Reducers are pure.",
+    "fix": "Dispose from a handler or from outside the flow."
+  },
+  "SF043": {
+    "message": "Cannot dispose <flow> from inside its own dispatch",
+    "cause": "A handler of a running step called disposeFlow on its own object.",
+    "fix": "Dispose after the dispatch returns."
+  },
+  "SF044": {
+    "message": "flow disposed during the transition of <path> to <variant>",
+    "cause": "disposeFlow ran while a declared transition was pending; the transition's result is this Error.",
+    "fix": "Expect it when the object may be disposed during a transition."
+  },
+  "SF045": {
+    "message": "flow disposed before <signal> was reduced",
+    "cause": "disposeFlow ran while a send waited in the queue behind a transition.",
+    "fix": "Expect it when the object may be disposed while sends are queued."
+  },
+  "SF046": {
+    "message": "flow disposed",
+    "cause": "The reason of a transition's AbortSignal (TransitionAborted of kind disposed) when disposeFlow ran during its work.",
+    "fix": "Stop the work on abort and release what it acquired."
+  },
+  "SF047": {
+    "message": "<variant>: mockHandlers mocks enter, exit, update, transition and commit handlers, not <key>",
+    "cause": "mockHandlers got a key that is not a handler kind.",
+    "fix": "Use only the keys enter, exit, update, transition and commit."
+  },
+  "SF048": {
+    "message": "<variant>: its <kind> handlers are mocked already; dispose that mock first",
+    "cause": "mockHandlers mocked a kind of a variant that a live mock covers already.",
+    "fix": "Dispose the first mock (using mocks = ...) before mocking again."
+  },
+  "SF049": {
+    "message": "<variant> is not asynchronous: only a variant declared with { async: true } has transition handlers",
+    "cause": "A transition handler was registered or mocked on a variant not marked async.",
+    "fix": "Declare the variant with { async: true }, or use an enter handler."
+  },
+  "SF050": {
+    "message": "Handler '<handler>' returned a promise; enter, exit and update handlers are synchronous",
+    "cause": "An enter, exit or update handler is async or returned a promise.",
+    "fix": "Return a HandlerResult synchronously; put the waiting in a transition handler."
+  },
+  "SF051": {
+    "message": "exit handler '<handler>' returned the named result <name>; only an enter, update or transition handler may",
+    "cause": "An exit handler returned a named result; the node it leaves holds no instance to fold it into.",
+    "fix": "Return the named result from an enter, update or transition handler."
+  },
+  "SF052": {
+    "message": "Transition handler '<handler>' returned no promise",
+    "cause": "A transition handler returned a value that is not a promise.",
+    "fix": "Make the transition handler async, or return a promise of its HandlerResult."
+  },
+  "SF053": {
+    "message": "Handler '<handler>' did not return a HandlerResult",
+    "cause": "A handler returned, or its promise resolved to, something other than a HandlerResult.",
+    "fix": "Return HandlerResult.ok(), a refusal, an error, or a named result of the variant."
+  },
+  "SF054": {
+    "message": "Handler '<handler>' on <variant> returned <variant>'s named result <name>",
+    "cause": "A handler returned a named result of another variant than the one it was registered on.",
+    "fix": "Return a named result of the handler's own variant."
+  },
+  "SF055": {
+    "message": "two transitions declared in one dispatch: <path> and <path>",
+    "cause": "Two reducers answered one signal with StateResult.transition; an object has one pending transition.",
+    "fix": "Declare the transition in one reducer; let the other answer with next."
+  },
+  "SF056": {
+    "message": "<where> returned a transition or a failed; it answers with next only",
+    "cause": "A result reducer of another state returned StateResult.transition or a failed.",
+    "fix": "Return the next instance or props only from a result reducer."
+  },
+  "SF057": {
+    "message": "<where> returned <instance>, whose key <key> is not its own",
+    "cause": "A reducer of an element of a keyed set returned an instance whose key differs from the element's.",
+    "fix": "Keep the props the key is made of; add a new element to change the key."
+  },
+  "SF058": {
+    "message": "No state <name> in the flow",
+    "cause": "A reducer's ctx.read named a state the flow does not hold.",
+    "fix": "Read a state the flow was applied with, by its name."
+  },
+  "SF059": {
+    "message": "<where> returned a promise; reducers are synchronous",
+    "cause": "A signal or result reducer is async or returned a promise.",
+    "fix": "Return the next state synchronously; put the waiting in a transition handler."
+  },
+  "SF060": {
+    "message": "<where> returned no StateResult, instance or props",
+    "cause": "A signal reducer returned something other than a StateResult, an instance or props.",
+    "fix": "Return a StateResult, an instance of the state, or its props."
+  },
+  "SF061": {
+    "message": "<where> returned <instance>, not an instance of <definition>",
+    "cause": "A reducer returned an instance of another state definition than its own.",
+    "fix": "Return an instance of the reducer's own state, made by one of its variants."
+  },
+  "SF062": {
+    "message": "<call>: <variant> has no result reducer for <name>",
+    "cause": "A named result reached a variant that declares no result reducer of that name.",
+    "fix": "Add the result reducer to the variant's defineFlow, or return the result from the variant that has it."
+  },
+  "SF063": {
+    "message": "<where> changed a nested state; nested states change only through a step",
+    "cause": "A result reducer returned props whose nested states differ from the ones it got.",
+    "fix": "Keep the nested states as they are; change them with a signal their own reducers take."
+  },
+  "SF064": {
+    "message": "no reducer for <signal> in <variants>",
+    "cause": "An Ignored result: no variant the states are in has a reducer for the signal.",
+    "fix": "Add a reducer for the signal to the variant, or expect Ignored where it is not handled."
+  },
+  "SF065": {
+    "message": "Result is abstract: a reducer returns a StateResult, a handler a HandlerResult",
+    "cause": "Result was constructed directly.",
+    "fix": "Use StateResult in a reducer and HandlerResult in a handler."
+  },
+  "SF066": {
+    "message": "<the result expect() refused: its signal, handler, kind, state, and error or message>",
+    "cause": "expect() got a result of a kind it was not given. The result's error, when it has one, is its cause.",
+    "fix": "Handle the outcome the message names, or list its kind in expect()."
+  },
+  "SF067": {
+    "message": "a pending or declared transition result cannot be merged or copied",
+    "cause": "merge was called on an InTransition result.",
+    "fix": "Await done() and merge its outcome."
+  },
+  "SF068": {
+    "message": "StateResult.ok takes a state instance; a reducer returns props bare",
+    "cause": "StateResult.ok got props or another value, not an instance.",
+    "fix": "Pass an instance (variant(props)), or return the props bare."
+  },
+  "SF069": {
+    "message": "StateResult.ok: failed must be an instance of next's state",
+    "cause": "The failed given to StateResult.ok is not an instance of next's definition.",
+    "fix": "Pass a failed made by a variant of next's state."
+  },
+  "SF070": {
+    "message": "StateResult.transition takes a state instance as next; a reducer returns props bare",
+    "cause": "StateResult.transition got props or another value as next.",
+    "fix": "Pass an instance as next (variant(props))."
+  },
+  "SF071": {
+    "message": "StateResult.transition takes a state instance as temp, the instance the node holds while the work runs",
+    "cause": "StateResult.transition got no instance as temp.",
+    "fix": "Pass the instance the node holds during the work as temp."
+  },
+  "SF072": {
+    "message": "StateResult.transition takes failed, an instance of next's state, which the node takes when the work fails",
+    "cause": "StateResult.transition got no instance as failed.",
+    "fix": "Pass the instance the node takes when the work fails as failed."
+  },
+  "SF073": {
+    "message": "StateResult.transition: next, temp and failed must be instances of one state definition",
+    "cause": "next, temp and failed of StateResult.transition are of different definitions.",
+    "fix": "Make next, temp and failed with variants of the reducer's own state."
+  },
+  "SF074": {
+    "message": "StateResult.transition: the options are an object { timeoutMs }",
+    "cause": "The options of StateResult.transition are not an object.",
+    "fix": "Pass { timeoutMs } or leave the options out."
+  },
+  "SF075": {
+    "message": "StateResult.transition: the options take timeoutMs only, not <key>",
+    "cause": "The options of StateResult.transition have a key other than timeoutMs.",
+    "fix": "Pass timeoutMs only."
+  },
+  "SF076": {
+    "message": "StateResult.transition: timeoutMs must be a positive finite number <= <max>, got <value>",
+    "cause": "timeoutMs is not a positive finite number up to the largest delay setTimeout honours.",
+    "fix": "Pass a timeoutMs above 0 and at most 2147483647."
+  },
+  "SF078": {
+    "message": "State prop `<key>` holds a non-plain class instance `<class>`; wrap live resources in `Box(...)` or expose frozen plain data.",
+    "cause": "A state's props hold a Set, a Map, or an unfrozen instance of a class.",
+    "fix": "Wrap a live resource in Box(...); use FrozenSet, FrozenMap or frozen plain data for data."
+  },
+  "SF079": {
+    "message": "State prop `<key>` holds <value> inside its data; a nested state goes directly in a prop, as an instance or in Items (def.items()).",
+    "cause": "A state instance or Items sits inside an array, object or collection in a prop, where its handlers would never run.",
+    "fix": "Put the nested state directly in a prop, alone or in def.items()."
+  },
+  "SF080": {
+    "message": "Not a state",
+    "cause": "A value that is not a state instance was given where one is needed.",
+    "fix": "Pass a state instance, made by a variant."
+  },
+  "SF081": {
+    "message": "Initial state variant not found",
+    "cause": "A state definition has no variant marked { initial: true }, and no start was given for it.",
+    "fix": "Mark one variant { initial: true }, or give the state in FlowConfig.start."
+  },
+  "SF082": {
+    "message": "<variant>: the parser returned something other than a plain object (prototype Object.prototype or null); the engine copies props without a constructor when it rebuilds a node",
+    "cause": "A state's parser returned a class instance or another non-plain value.",
+    "fix": "Return a plain object from the parser."
+  },
+  "SF083": {
+    "message": "State Flow object not found",
+    "cause": "A state definition was called on a value that is no snapshot or ctx holding that state.",
+    "fix": "Call the definition on a snapshot of the flow or on a reducer's ctx."
+  },
+  "SF084": {
+    "message": "State not found: <name>",
+    "cause": "The snapshot holds no instance of this definition under its name (another definition may share the name).",
+    "fix": "Read a state the flow was applied with."
+  },
+  "SF085": {
+    "message": "Only one initial state variant is allowed",
+    "cause": "A second variant of one state was marked { initial: true }.",
+    "fix": "Mark one variant initial."
+  },
+  "SF086": {
+    "message": "<variant>: an initial variant cannot be transitional",
+    "cause": "A variant was marked both initial and transitional.",
+    "fix": "Drop one of the two marks."
+  },
+  "SF087": {
+    "message": "<variant>: an initial variant cannot be asynchronous",
+    "cause": "A variant was marked both initial and async.",
+    "fix": "Start in a synchronous variant and enter this one with a transition."
+  },
+  "SF088": {
+    "message": "<variant>: a transitional variant cannot be asynchronous",
+    "cause": "A variant was marked both transitional and async.",
+    "fix": "Drop one of the two marks."
+  },
+  "SF089": {
+    "message": "Name was not provided",
+    "cause": "build() was called on a state with no .name().",
+    "fix": "Call .name(\"...\") before build()."
+  },
+  "SF090": {
+    "message": "No state variants are defined",
+    "cause": "build() was called on a state with no .variant().",
+    "fix": "Declare at least one variant, one of them initial."
+  },
+  "SF091": {
+    "message": "<name>: a variant cannot be named items, which is the definition's items() method",
+    "cause": "A variant was named items, the name of the definition's own method.",
+    "fix": "Name the variant otherwise."
+  },
+  "SF092": {
+    "message": "<name>: the signal <signal> is listed under the key <key>; a reducer keyed <key> would never run",
+    "cause": "A key of the object given to .signals() is not the name of the signal under it.",
+    "fix": "List each signal under the name given to its defineSignal(name)."
+  },
+  "SF093": {
+    "message": "Flow is already defined: <variant>",
+    "cause": "defineFlow ran twice for one variant.",
+    "fix": "Call defineFlow once per variant, with all its reducers."
+  }
+}

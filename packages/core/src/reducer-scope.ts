@@ -1,7 +1,7 @@
 /**
- * Module-private reducer-execution flag. Reducers run synchronously in exactly one place —
- * the `handler(state, signal, ctx)` call in `handleSignal` — so a boolean save/restore around
- * that call is leak-free against all async interleaving (a reducer cannot `await`).
+ * Module-private reducer-execution flag. Reducer code runs synchronously, in reducers.ts: signal reducers in
+ * `reduce`, result reducers in `foldOne`, and a keyed set's key function in `changedKey`. So a boolean
+ * save/restore around those calls cannot leak (a reducer cannot `await`).
  */
 let inReducer = false;
 

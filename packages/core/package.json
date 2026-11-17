@@ -1,6 +1,6 @@
 {
   "name": "@state-flow/core",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Type-safe, immutable state management built on signals, flows, and frozen state snapshots.",
   "license": "MIT",
   "author": "Ilya Pirogov",
@@ -48,7 +48,7 @@
   },
   "scripts": {
     "bench": "vitest bench --run",
-    "build": "npm run build:json && tsup && tsc -p tsconfig.dts.json && rimraf dist/examples.d.ts dist/examples.d.ts.map dist/logger-mock.d.ts dist/logger-mock.d.ts.map",
+    "build": "npm run build:json && tsup && tsc -p tsconfig.dts.json && rimraf dist/logger-mock.d.ts dist/logger-mock.d.ts.map",
     "build:json": "HASH=$(git rev-parse HEAD 2>/dev/null || echo \"\") && BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"\") && echo 'export default { name: \"'${npm_package_name}'\", version: \"'${npm_package_version}'\", commit: \"'${HASH}'\", branch: \"'${BRANCH}'\" };' > src/package-json.ts",
     "clean": "rimraf dist",
     "coverage": "vitest run --coverage",

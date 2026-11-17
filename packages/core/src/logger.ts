@@ -1,32 +1,32 @@
-import type { CompactStackTrace } from "./utils";
-
-// will be replaced to lively domain after deploying stacktrace-viewer
-const STACKTRACE_VIEWER_URL = "https://stacktrace.pirogov.dev/";
-
 export interface StateFlowLogEntry {
   // Flow identification
   flowName: string;
   signal: string;
   isAsync: boolean;
   startTime: number;
-  duration?: number; // Present for completed async transitions
-  /** Monotonic per-page dispatch-START order, shared across ALL flows. Entries are
-   * delivered (and recorded) in FINISH order; sort by this to reconstruct the true
-   * dispatch timeline, including same-millisecond ties. The engine always sets it on
-   * fresh entries; it is optional because hand-built entries (fixtures, replay tooling)
-   * and recordings from older builds predate the field. */
+  duration?: number; // Present on the end entry of an asynchronous declared transition
+  /** Monotonic per-page order in which steps STARTED, shared across ALL flows: each entry takes the next
+   * value when its step starts (a dispatch, a transition's end, an accepted abort). It is not commit
+   * order: a handler's dispatch to another target starts after the outer step and commits before it, and
+   * an abort's entry is numbered when the abort is accepted and commits once the aborted work settled or
+   * its timeout passed. Entries are delivered (and recorded) in FINISH order; sort by this to reconstruct the
+   * timeline, including same-millisecond ties. The engine always sets it on fresh entries; it is optional
+   * because hand-built entries (fixtures, replay tooling) and recordings from older builds predate the field. */
   dispatchOrder?: number;
-  /** Set when this dispatch STARTED while the flow still had an unresolved async
-   * transition: it ran against PRE-commit state variants (a held lock permits this).
-   * The classic stale-read race signature — an Ignored/unexpected result here usually
-   * means the signal raced the previous transition's commit. */
-  duringTransition?: boolean;
+  /** Set on the entries of a declared transition, one per step: "temp" on its temp step, also one that changes
+   * nothing, and "final" or "failed" on its end. A refused temp step keeps "temp", or, when its failed step commits,
+   * is marked "failed". */
+  transition?: "temp" | "final" | "failed";
+  /** Set on the entry of an accepted abort: the path of the node whose transition it aborted, as `job` or
+   * `media.producers[cam]`. */
+  aborted?: string;
   message: string; // Formatted message suitable for logging
 
   // States
   finalStates: Record<string, string>;
 
-  // State changes or attempts
+  // State changes or attempts. A change's or a handler result's stateName is the node's path: `media` for a
+  // top-level state, `media.transport` and `media.producers[cam]` for nested states.
   stateChanges: Array<{
     newState: string;
     oldState: string;
@@ -34,29 +34,47 @@ export interface StateFlowLogEntry {
   }>;
 
   // Handler executions
+  // A "transition" handler result is that of a transition handler a declared transition ran as its work, in the
+  // entry that ends the transition: the Result it settled to, "unsettled at timeout", "unsettled at failure" (another
+  // handler of the work refused first), or, in an accepted abort's entry, "dropped after abort: <result>" or "dropped
+  // after abort: unsettled". A "commit" handler result is that of a commit handler: "OK" when it returned, the error
+  // when it threw; or the error a commit delegate threw (see HandlerResult.onCommit), named by the exit, update, enter
+  // or transition handler that returned it.
   handlerResults: Array<{
-    type: "enter" | "exit" | "update" | "rollback";
+    type: "enter" | "exit" | "update" | "commit" | "transition";
     handlerName: string;
     stateName: string;
     result: string;
   }>;
 
+  // An observer's result on a change of a node, named by its path as in stateChanges: whether its compare asked for its
+  // callback (true with no compare for a nested node that held no instance of its state before); when the compare
+  // threw, false, and `error` is the string form of the throw.
   observers: Array<{
     observerName: string;
     stateName: string;
     needObserve: boolean;
+    error?: string;
   }>;
-
-  // Enqueued signal chain
-  enqueuedSignals: Array<{
-    signal: string;
-    fromHandler: string;
-  }>;
-
-  stacktrace: CompactStackTrace | null;
 
   // Final result
   finalResult: string;
+
+  /** The final result as plain data, for tools: `finalResult` is text, and an Error's text starts with its error's own
+   * name ("StateFlowError: ..."), not with its kind. `kind` is the ResultKind's name, `message` an Ignored or Rejected
+   * result's message (null when it has none), and `errors` an Error result's errors, at least one for an Error and none
+   * for any other kind: each name and message is its string form, a missing (null or undefined) name reads "Error" and
+   * a missing message "". Two Errors that merged (see Result.merge) are listed flat, in merge order; any other error,
+   * an AggregateError a handler threw included, is one entry. `code` is the result's code (see Result.code), null when it
+   * has none, so a tool reads it without parsing a message. The engine sets it on every entry it delivers, unless reading an error's name or
+   * message threw while the data was built; it is optional for that and because hand-built entries and recordings
+   * from older builds predate it. */
+  finalResultData?: {
+    kind: string;
+    message: string | null;
+    code: string | null;
+    errors: Array<{ name: string; message: string }>;
+  };
 
   /** Set when the entry was emitted under a labeled `lock(target, label)`. Lets non-console
    * handlers group related signals; the console handler is grouped for you via `emitGrouped`. */
@@ -173,22 +191,17 @@ export const consoleLogHandler: StateFlowLogHandler = (entry: StateFlowLogEntry)
 
   entry.observers.reduce((l, r) => {
     l[r.stateName] ??= [];
-    l[r.stateName].push(`\tobserved by ${r.observerName}() => ${r.needObserve}`);
+    l[r.stateName].push(
+      `\tobserved by ${r.observerName}() => ${r.error === undefined ? r.needObserve : `threw ${r.error}`}`,
+    );
     return l;
   }, logs);
 
   console.groupCollapsed(entry.message);
 
-  for (const [, rows] of Object.entries(logs)) {
-    for (const row of rows) {
-      console.log(row);
-    }
-  }
-
-  if (entry.enqueuedSignals.length > 0) {
-    console.log("\nEnqueued Signals:");
-    for (const enq of entry.enqueuedSignals) {
-      console.log(`\t${enq.signal} (from ${enq.fromHandler})`);
+  for (const [, lines] of Object.entries(logs)) {
+    for (const line of lines) {
+      console.log(line);
     }
   }
 
@@ -196,11 +209,6 @@ export const consoleLogHandler: StateFlowLogHandler = (entry: StateFlowLogEntry)
   Object.entries(entry.finalStates).forEach(([name, state]) => {
     console.debug(`\t${name}: ${state}`);
   });
-
-  if (entry.stacktrace != null) {
-    console.log("\nStacktrace:");
-    console.log(`${STACKTRACE_VIEWER_URL}#${btoa(JSON.stringify(entry.stacktrace))}`);
-  }
 
   console.groupEnd();
 };

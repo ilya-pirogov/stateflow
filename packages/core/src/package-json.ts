@@ -1,1 +1,1 @@
-export default { name: "@state-flow/core", version: "1.2.0", commit: "1803cca90200b5dbd126a8409cdb7f8c9fe290e0", branch: "main" };
+export default { name: "@state-flow/core", version: "2.0.0", commit: "db2bbf9d1650916de6c58ec9600f8361f25263de", branch: "HEAD" };

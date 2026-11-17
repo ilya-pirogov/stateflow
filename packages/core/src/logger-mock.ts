@@ -97,11 +97,10 @@ class MockStateFlowLoggerAssertions {
    */
   haveHandler(
     state: unknown,
-    type: "enter" | "exit" | "update" | "rollback",
+    type: "enter" | "exit" | "update" | "commit" | "transition",
     handlerName: string,
     result?: string,
   ): this {
-    console.log(this.entries[0].handlerResults);
     const found = this.entries.some((entry) =>
       entry.handlerResults.some(
         (handler) =>
