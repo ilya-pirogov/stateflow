@@ -12,6 +12,8 @@
     "format": "biome format --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0"
+    "@biomejs/biome": "^2.5.0",
+    "typescript": "6.0.3",
+    "vitest": "^2.1.0"
   }
 }

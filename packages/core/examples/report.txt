@@ -1,0 +1,36 @@
+driver.activating
+driver.activating reducer stop
+driver.activating transitional
+driver.active
+driver.active async
+driver.active reducer stop
+driver.active result loaded
+driver.failed
+driver.failed reducer play
+driver.failed reducer stop
+driver.idle
+driver.idle initial
+driver.idle reducer play
+media.active
+media.active reducer addProducer
+media.active reducer close
+media.active reducer removeProducer
+media.idle
+media.idle initial
+media.idle reducer open
+media.opening
+media.opening reducer close
+media.opening transitional
+producer.active
+producer.active async
+producer.active reducer pause
+producer.active reducer resume
+producer.active result created
+producer.creating
+producer.creating transitional
+producer.failed
+transport.closed
+transport.closed initial
+transport.open
+transport.open async
+transport.open result opened

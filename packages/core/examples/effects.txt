@@ -1,0 +1,11 @@
+driverState.active enter attach: world.attach
+driverState.active exit detach: world.detach
+driverState.active transition fetchManifest: world.fetchManifest
+producer.active exit closeProducer:
+producer.active transition produce: world.produce
+producer.active update pauseOrResume:
+second.done commit notifyDone: world.notify
+second.good enter lightOn: world.light
+second.good exit lightOff: world.light
+transport.open exit closeSocket:
+transport.open transition connect: world.connect

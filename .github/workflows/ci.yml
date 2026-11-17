@@ -34,8 +34,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The tools use DisposableStack, a global Node has from version 24, so their tests run on that row only.
+      # The library is tested on every row.
       - name: Run tests
+        if: matrix.node-version == 24
         run: npm test
+
+      - name: Run the library's tests
+        if: matrix.node-version != 24
+        run: npm test --workspace @state-flow/core
 
       - name: Build
         run: npm run build
