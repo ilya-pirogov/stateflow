@@ -56,6 +56,16 @@ const nodes = {
       language: {
         type: String,
       },
+      // Why the engine's docs check (packages/core/src/.tests/docs-examples.spec.ts) does not compile this block.
+      unchecked: {
+        type: String,
+        render: false,
+      },
+      // An API signature in shorthand, whose names that check compares with the engine's exports.
+      shorthand: {
+        type: Boolean,
+        render: false,
+      },
     },
   },
 }

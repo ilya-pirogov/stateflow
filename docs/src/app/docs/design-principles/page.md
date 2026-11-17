@@ -3,382 +3,245 @@ title: Design Principles
 description: Core philosophy and design decisions behind StateFlow
 ---
 
-StateFlow's architecture is built on fundamental principles that address common pitfalls in state management. Understanding these principles will help you build more predictable, maintainable, and debuggable applications. {% .lead %}
+StateFlow rests on a few decisions: state is immutable and changes only through signals, every signal gets an explicit result, reducers decide while handlers only apply, and every change can be seen. {% .lead %}
 
 ## The Three Pillars
 
-StateFlow is built on three foundational principles that work together to create a robust state management system:
+### 1. Consistent State
 
-### 1. Guaranteed State Consistency
-
-**Problem**: Traditional state management systems allow mutations from anywhere, leading to race conditions and unpredictable behavior.
-
-**Solution**: StateFlow enforces immutability at both the type level and runtime, making inconsistent states impossible.
+State is deep-frozen and changes only through signals. A target takes one dispatch at a time through its lock, and each step commits whole or not at all.
 
 ```typescript
-// Traditional mutable approach (problematic)
-const user = { name: 'Alice', email: 'alice@example.com' };
-user.name = 'Bob'; // Silent mutation - who changed this and when?
-someAsyncFunction(user); // What if this modifies user?
+const profileSignals = { rename: defineSignal<{ name: string }>("rename") };
 
-// StateFlow approach (guaranteed consistency)
-const userState = defineState<{ name: string; email: string }>()
-  .name("user")
-  .signals(signals)
-  .variant("active", true)
+const profileState = defineState<{ name: string; email: string }>()
+  .name("profile")
+  .signals(profileSignals)
+  .variant("active", { initial: true })
   .build();
 
-const user = userState.active({ name: 'Alice', email: 'alice@example.com' });
-// user.name = 'Bob'; // TypeError: Cannot assign to read only property
+defineFlow(profileState.active, { rename: (s, { name }) => ({ ...s, name }) });
 
-// Only way to change state is through signals
-await using send = await lock(app);
-await send(signals.updateName({ name: 'Bob' })).done();
-```
+const user = profileState.active({ name: "Alice", email: "alice@example.com" });
+// user.name = "Bob"; // a type error, and a TypeError at run time
 
-**Benefits**:
-- **No race conditions**: Only one transition can happen at a time
-- **Predictable updates**: All changes go through defined flows
-- **Time-travel debugging**: Previous states remain unchanged
-- **Safe concurrency**: Multiple observers can safely read state
-
-### 2. Explicit Feedback on Every Operation
-
-**Problem**: Most state systems silently ignore invalid operations or fail without clear feedback.
-
-**Solution**: Every signal dispatch returns an explicit Result that categorizes the outcome.
-
-```typescript
-// Traditional approach (silent failures)
-store.dispatch(action); // Did this work? Was it ignored? Did it fail?
-
-// StateFlow approach (explicit feedback)
-try {
+// The only way to change it is a signal.
+{
   await using send = await lock(app);
-  await send(signals.login({ email, password }))
-    .expect(ResultKind.OK, ResultKind.Ignored)
-    .done();
-  console.log('Login successful');
-} catch (error) {
-  // A failed expectation throws a StateFlowError whose message describes the
-  // outcome (its message contains "was rejected").
-  if (error instanceof StateFlowError) {
-    console.log(`Login not accepted: ${error.message}`);
-  } else {
-    console.error(`Login failed: ${error}`);
-  }
+  await send(profileSignals.rename({ name: "Bob" })).done();
 }
 ```
 
-**Benefits**:
-- **No silent failures**: Every operation provides feedback
-- **Clear error messages**: Know exactly what went wrong
-- **Async operation tracking**: Monitor long-running transitions
-- **Debugging clarity**: Understand system behavior immediately
+### 2. Explicit Feedback
 
-### 3. Complete State Visibility
-
-**Problem**: Complex applications make it difficult to understand current state and track changes.
-
-**Solution**: StateFlow provides comprehensive introspection tools and human-readable representations.
+Every send returns a `Result`: `OK`, `Ignored`, `Rejected`, `Error`, or `InTransition` while a declared transition runs. `expect(...kinds)` names the kinds the caller accepts and throws a `StateFlowError` for any other; on a pending result it applies to the outcome, at `done()`.
 
 ```typescript
-// Built-in state visibility
-const mediaState = defineState<{ 
-  position: number; 
-  duration: number 
-}>()
+const userSignals = { login: defineSignal<{ email: string; password: string }>("login") };
+
+const userState = defineState<{ id: string; email: string }>()
+  .name("user")
+  .signals(userSignals)
+  .variant("guest", { initial: true })
+  .variant("authenticated")
+  .build();
+
+try {
+  await using send = await lock(app);
+  await send(userSignals.login({ email, password })).expect(ResultKind.OK).done();
+} catch (error) {
+  // The message says what the result was: "... was rejected: Message: invalid email".
+  console.warn(`login not accepted: ${error}`);
+}
+```
+
+### 3. Visibility
+
+Every instance prints as `<state>.<variant>(<props>)`, each dispatch writes log entries with its changes and each handler's result, and observers, watches, events and subscribers are told of each commit.
+
+```typescript
+const mediaState = defineState<{ position: number; duration: number }>()
   .name("media")
-  .signals(signals)
+  .variant("paused", { initial: true })
   .variant("playing")
-  .variant("paused", true)
-  .stringRepr(s => `${s.position}/${s.duration}s`)
+  .stringRepr((s) => `${s.position}/${s.duration}s`)
   .build();
 
 const media = mediaState.playing({ position: 30, duration: 180 });
-console.log(`${media}`); // "media.playing(30/180s)"
-console.log(String(stateVar(media))); // "media.playing"
+String(media); // "media.playing(30/180s)"
+String(stateVar(media)); // "media.playing"
 
-// Observer patterns for tracking changes
-observe(app, [mediaState.playing], (state) => {
-  console.log(`Playback position: ${state.position}s`);
-});
+using playing = observe(app, [mediaState.playing], (state) => console.log(`at ${state.position}s`));
 ```
-
-**Benefits**:
-- **Clear debugging**: Human-readable state representations
-- **Change tracking**: Observers for specific state transitions
-- **State introspection**: Know exactly which variant is active
-- **Logging integration**: Built-in support for comprehensive logging
 
 ## Core Design Decisions
 
 ### Immutability by Default
 
-StateFlow chooses immutability as the default because it eliminates an entire class of bugs:
+Building an instance freezes its props deeply. State is also flat: every prop holds frozen data, a nested state, or a [`Box`](/docs/boxing-live-resources), an opaque handle to a live resource that cannot be frozen. Reducers may place a Box but never read it: `deref()` throws inside a reducer, as dispatching does.
 
 ```typescript
-// Deep immutability: state is deep-frozen on construction (sealProps)
-const state = mediaState.playing({ position: 30, duration: 180 });
-Object.isFrozen(state); // true
-
-// Nested objects/arrays are frozen too, automatically — no custom parser needed
-const complexState = defineState<{
+const accountState = defineState<{
   user: { id: string; preferences: { theme: string } };
   sessions: Array<{ id: string; active: boolean }>;
 }>()
-  .name("app")
-  .signals(signals)
-  .variant("loaded", true)
+  .name("account")
+  .variant("loaded", { initial: true })
   .build();
 
-Object.isFrozen(complexState); // true
-Object.isFrozen(complexState.user); // true — nested objects are frozen too
-```
-
-State is also **flat**: every prop is either deep-frozen value data or an opaque
-[`Box`](/docs/boxing-live-resources) handle for a live resource (a `MediaStream`, a socket)
-that cannot be frozen. Reducers may place a `Box` in state but must never `deref()` it — that,
-like dispatching from inside a reducer, throws — because reducers must stay pure.
-
-**Trade-offs**:
-- ✅ **Pros**: No accidental mutations, safe sharing, predictable behavior
-- ⚠️ **Cons**: Memory overhead for large objects, requires object spreading for updates
-
-### Signal-Driven Architecture
-
-All state changes must go through signals, creating a clear audit trail:
-
-```typescript
-// Bad: Direct mutation
-app.user.loginAttempts++;
-
-// Good: Signal-driven change (dispatch via lock() + send() — see "Dispatching" below)
-await using send = await lock(app);
-await send(signals.incrementLoginAttempts()).done();
-```
-
-**Benefits**:
-- **Audit trail**: Every change has a named reason
-- **Validation**: Centralized place for business rules
-- **Testing**: Easy to simulate any sequence of operations
-- **Time travel**: Can replay signals to recreate states
-
-### Dispatching: always `lock()` + `send()`
-
-A single `dispatch()` is a footgun once any flow uses async transitions: it throws if a lock
-is held or a transition is in flight, which turns an innocent fire-and-forget into an uncaught
-rejection. The canonical, race-free pathway is to acquire the lock and `send` through it:
-
-```typescript
-// ✅ The pattern to use everywhere
-await using send = await lock(app);
-await send(signals.play()).expect(ResultKind.OK).done();
-await send(signals.seek({ position: 30 })).done(); // same critical section, FIFO-ordered
-// lock released automatically at scope exit
-
-// ⚠️ Deprecated: bare dispatch() — throws under a held lock / active transition.
-// Reserve it only for the two cases a lock cannot cover: synchronous teardown
-// (e.g. `beforeunload`) and pre-lock bootstrap.
-dispatch(app, signals.dispose({ reason: "page unloaded" }));
-```
-
-Two rules that follow from this:
-
-- **`.expect()` is enforced at `.done()`.** On an async (`InTransition`) result the
-  expectation is checked when the transition resolves, so an async dispatch **must** chain
-  `.done()` or the expectation is never asserted. Always write `await send(sig).expect(...).done()`.
-- **Cross-target follow-ups use `lock(otherTarget)` + `send`**, never a reach-through. A
-  small same-target follow-up *state change* can use `Result.enqueue` (at most one per
-  handler — see the Signal System guide).
-
-### Decisions Live in the Flow (Reducer Decides, Handler Applies)
-
-StateFlow's deepest principle: the **decision** — what the next state is, whether a transition
-is allowed, resolving an input to a concrete value, redundancy/readiness checks — lives in the
-**pure `defineFlow` reducer**. The **effect handler** is a *thin applier* that runs only for an
-already-validated state and just performs the real side effect. An invalid request is rejected
-by the flow **before any effect runs** — the handler is never called for a state that shouldn't
-exist.
-
-```typescript
-// ❌ Anti-pattern: a thin reducer that stores a raw value, and a fat handler that
-//    does all the validation/resolution AND the side effect.
-defineFlow(quality.active, {
-  setQuality: (s, sig) => quality.active({ ...s, preferred: sig.name }), // just stores a string
+const loaded = accountState.loaded({
+  user: { id: "u1", preferences: { theme: "dark" } },
+  sessions: [{ id: "s1", active: true }],
 });
-sm.addUpdateHandler(quality.active, (state) => {
-  const q = state.qualities.find((x) => x.name === state.preferred);
-  if (q == null) return Result.ok();          // invalid selection silently swallowed
-  if (q.id === state.currentId) return Result.ok(); // redundancy buried in the effect
-  player.switchTo(q);                          // decision + effect tangled together
-  return Result.ok();
-});
+Object.isFrozen(loaded.user.preferences); // true
+```
 
-// ✅ The reducer decides; the handler only applies.
-function resolve(s): Result<{ id: string | null }> {
-  const q = s.qualities.find((x) => x.name === s.preferred);
-  if (q == null) {
-    return s.qualities.length > 0
-      ? Result.reject(`unknown quality: ${s.preferred}`) // loaded & absent → invalid
-      : Result.ok({ id: null });                          // not loaded yet → buffer, retry later
+The price: every change builds new objects, usually by spreading the old props.
+
+### Dispatch Through `lock()` and `send()`
+
+A caller takes the target's lock and sends through it. Locks are served in the order they were asked for, and while a declared transition is pending, the holder's sends queue behind it:
+
+```typescript
+{
+  await using send = await lock(app);
+  await send(mediaSignals.play()).expect(ResultKind.OK).done();
+  await send(mediaSignals.seek({ position: 30 })).done(); // same critical section, in order
+} // the lock is released at the end of the scope, once no transition is pending
+```
+
+- **`expect()` is applied at `done()`** on a pending result, so a send that may declare a transition chains `.done()`: `await send(signal).expect(...).done()`.
+- **`dispatch` is deprecated.** It throws under a held lock or a pending transition, and stays for what a lock cannot do: a synchronous teardown, a dispatch before any lock exists, and the abort of a transition that another caller's lock holds (`{ abort: true }` skips the lock).
+- **A follow-up on the same target belongs to the same dispatch:** every state a signal concerns has its own reducer for it, a parent decides its nested states, and an entry that waits for the world is a declared transition. A follow-up on another target takes that target's lock.
+
+### The Reducer Decides, the Handler Applies
+
+The decision, what the next state is and whether a request is allowed, lives in the pure reducers. A handler only applies an approved state to the world, and it cannot choose the next state: a synchronous dispatch to its own target throws, and a declared transition's work only succeeds or refuses, while its reducer named both ends.
+
+- **A handler can only refuse.** An exit, update or enter handler's Rejected or throw refuses the step, and the target goes where its reducer said: to the failed it named, or, without one, nowhere: it stays as it was.
+- **Data from the world enters props one way:** a handler returns a named result of the variant it enters or updates, `driverState.active.results.loaded({ manifest })`, and the variant's result reducer folds it into props.
+- **Failed is the floor.** The failed step's own handlers cannot stop its commit, and the reason reaches the failed state as the built-in `FAILURE` result (see [Failure States](/docs/state-consistency#failure-states)).
+- **Asynchronous entry is declared on the variant.** `.variant("active", { async: true })` says where the state is defined that entering `active` waits for the world. A node enters it only at the end of a declared transition, and only such a variant takes transition handlers.
+- **Releases follow the commit.** Enter and update handlers get the step's `AbortSignal`, which aborts when the step does not commit, so they release what they made. What a step replaces is released after the commit, in a commit delegate (`HandlerResult.ok().onCommit(release)`) or by the engine for a `DisposableBox`. Written this way, a refused step leaves the world as it leaves the state.
+- **Handlers can be switched off.** `setHandlersDisabled(true)` is read at every handler call: a run then shows what the reducers decide, with no handler touching the world, and `mockHandlers` supplies the world's answers a test needs (see [Testing](/docs/testing)).
+
+```typescript
+// quality.ts
+import { defineFlow, defineSignal, defineState, StateResult } from "@state-flow/core";
+
+type QualityProps = {
+  qualities: Array<{ name: string; id: string }>;
+  currentId: string | null;
+};
+
+export const qualitySignals = { setQuality: defineSignal<{ name: string }>("setQuality") };
+
+export const quality = defineState<QualityProps>()
+  .name("quality")
+  .signals(qualitySignals)
+  .variant("active", { initial: true })
+  .build();
+
+// The decision, pure: the refusal, the state as it is, or the new current quality.
+function resolve(s: QualityProps, name: string): QualityProps | StateResult {
+  const q = s.qualities.find((x) => x.name === name);
+  if (q === undefined) {
+    return StateResult.rejected(`unknown quality: ${name}`);
   }
-  if (q.id === s.currentId) return Result.ok({ id: null }); // redundant → no-op
-  return Result.ok({ id: q.id });                            // a real, valid change → apply
+  return q.id === s.currentId ? s : { ...s, currentId: q.id };
 }
 
-defineFlow(quality.active, {
-  setQuality: (s, sig) => {
-    const r = resolve({ ...s, preferred: sig.name });
-    if (r.kind !== ResultKind.OK) return r;     // invalid → Reject; the effect NEVER runs
-    const id = r.data?.id ?? null;              // Result.data is TData | null
-    return quality.active({ ...s, preferred: sig.name, pendingId: id });
-  },
-});
-sm.addUpdateHandler(quality.active, (state) => {
-  if (state.pendingId != null) player.switchTo(state.pendingId); // thin: apply only
-  return Result.ok();
+defineFlow(quality.active, { setQuality: (s, { name }) => resolve(s, name) });
+```
+
+```typescript
+// The handler applies what the reducer approved, and nothing else.
+sm.addUpdateHandler(quality.active, (s) => {
+  if (s.currentId !== null) {
+    switchTo(s.currentId);
+  }
+  return HandlerResult.ok();
 });
 ```
 
-**Benefits**:
-- **Invalid requests reject**: `setQuality("does-not-exist")` against a loaded list returns
-  `Rejected` — the caller learns it failed and nothing else is touched.
-- **Effects can't fire for un-approved state**: a redundant or not-ready selection produces no
-  side effect because the reducer set nothing for the handler to apply.
-- **Pure and testable in isolation**: supply a state, assert the `Result` — no real work needed.
-  The model to copy is a rich reducer (`mediaUpdate`-style) that branches on status and
-  validates, not a one-liner that stores a value.
+An unknown quality is Rejected before any effect runs, and the current one returns the instance the reducer was given, which changes nothing and runs no handler. A rule that several reducers could break, "the player stays paused while the source is not ready", is a plain function that each reducer it concerns calls on the snapshot from before the signal (`ctx.read("source")`).
 
-### Type Safety as First-Class Citizen
+### Type Safety
 
-StateFlow leverages TypeScript's type system to prevent errors at compile time:
+Payloads, props, reducers and handlers are typed from the definitions:
 
 ```typescript
-// Type-safe signal parameters
-const updateUser = defineSignal<{
-  id: string;
-  name?: string;
-  email?: string;
-}>("updateUser");
+const updateUser = defineSignal<{ id: string; name?: string; email?: string }>("updateUser");
 
-// Compile error: missing required 'id' property
-// dispatch(app, updateUser({ name: 'Alice' }));
-
-// Compile error: invalid property 'age'
-// dispatch(app, updateUser({ id: '123', age: 30 }));
-
-// Correct usage
-dispatch(app, updateUser({ id: '123', name: 'Alice' }));
+// updateUser({ name: "Alice" }); // error: id is missing
+// updateUser({ id: "123", age: 30 }); // error: age is not a field
+const signal = updateUser({ id: "123", name: "Alice" });
 ```
 
-**Type Safety Features**:
-- **Signal validation**: Parameters checked at compile time
-- **State shape enforcement**: State properties match definitions
-- **Flow handler signatures**: Automatic type inference for handlers
-- **Result type narrowing**: Discriminated unions for result handling
+- A reducer's state and payload are typed by its variant and signal; its answer must be its own state's.
+- A handler is typed by its variant, so it can return only that variant's named results.
+- `ctx.read("name")` is typed by the flow's definitions when the state declares them (`defineState<Props, Defs>()`), and `isIn(instance, "variant")` checks the variant names.
 
-## Architectural Philosophy
+### Composition Over Inheritance
 
-### Prefer Composition Over Inheritance
-
-StateFlow encourages building complex behavior through composition of simple states:
+Behavior is built from small, focused states, each with its own signals, reducers and handlers:
 
 ```typescript
-// Instead of complex inheritance hierarchies
-class BasePlayer extends EventEmitter {
-  // Complex base class with many responsibilities
-}
+const playbackState = defineState<{ position: number }>().name("playback").variant("stopped", { initial: true }).build();
+const volumeState = defineState<{ level: number }>().name("volume").variant("audible", { initial: true }).build();
 
-class VideoPlayer extends BasePlayer {
-  // Even more complexity
-}
-
-// StateFlow prefers composition
-const playbackState = defineState<PlaybackProps>()...;
-const volumeState = defineState<VolumeProps>()...;
-const qualityState = defineState<QualityProps>()...;
-
-// Composed application
+// The target holds one prop per state, under the state's name.
 interface MediaPlayer {
   playback: Infer<typeof playbackState>;
   volume: Infer<typeof volumeState>;
-  quality: Infer<typeof qualityState>;
 }
 ```
 
+States compose in depth too: a prop may hold another state's instance, or an `Items` of them, and those nested states take signals and run handlers like top-level ones, while their parent decides which of them exist (see [Nested States](/docs/core-concepts#nested-states)).
+
 ### Explicit Over Implicit
 
-StateFlow makes behavior explicit rather than relying on conventions:
+An observer names the variants it follows and, optionally, what counts as a change; a watch names its predicate over the whole flow:
 
 ```typescript
-// Implicit behavior (hard to understand)
-store.subscribe((state) => {
-  // When does this run? What triggers it?
-  // What if multiple states change?
-});
-
-// Explicit behavior (clear intent)
-observe(
+using auth = observe(
   app,
-  [userState.authenticated, userState.guest], // Specific states
-  (state) => updateUI(state), // Clear action
-  (prev, curr) => prev.id !== curr.id // Explicit comparison
+  [userState.authenticated, userState.guest],
+  (state) => updateUi(state),
+  (prev, cur) => prev.id !== cur.id,
+);
+
+using userWatch = watch(
+  app,
+  (cur, prev) => stateVar(cur.user) !== stateVar(prev.user),
+  (cur) => console.log(`user is ${String(stateVar(cur.user))}`),
 );
 ```
 
-### Fail Fast with Clear Messages
+### Fail Fast
 
-StateFlow prefers immediate, clear failures over silent degradation:
+A misuse fails at once, with a message that names it: a second `defineFlow` for a variant throws, an answer that breaks a rule of the plan is an Error before any handler runs, and a refusal says why:
 
 ```typescript
-// Will throw immediately if flow already defined
-defineFlow(userState.guest, { /* handlers */ });
-defineFlow(userState.guest, { /* different handlers */ }); // StateFlowError
-
-// Will reject with clear message
 defineFlow(userState.guest, {
-  login: (state, signal) => {
-    if (!isValidEmail(signal.email)) {
-      return Result.reject("Invalid email format");
+  login: (s, { email, password }) => {
+    if (!email.includes("@")) {
+      return StateResult.rejected("invalid email");
     }
-    if (signal.password.length < 8) {
-      return Result.reject("Password must be at least 8 characters");
+    if (password.length < 8) {
+      return StateResult.rejected("the password needs 8 characters");
     }
-    // ... authentication logic
-  }
+    return userState.authenticated({ ...s, email });
+  },
 });
+// defineFlow(userState.guest, { ... }); // throws: Flow is already defined: user.guest [SF093] Call defineFlow once per variant, with all its reducers.
 ```
-
-## StateFlow vs Alternatives
-
-| Feature | Redux | MobX | Zustand | StateFlow |
-|---------|-------|------|---------|-----------|
-| **Immutability** | Convention | Mutations | Mixed | Enforced |
-| **Type Safety** | Setup required | Decorators | Manual | Built-in |
-| **Async** | Middleware | runInAction | Manual | Native |
-| **Error Feedback** | Silent | Basic | Basic | Explicit |
-| **Complexity** | High | Medium | Low | Medium |
-
-## When to Choose StateFlow
-
-**Best for:**
-- Complex applications with multiple interacting states
-- Teams needing structure and maintainability  
-- TypeScript-first development
-- Applications requiring comprehensive error handling
-
-**Consider alternatives for:**
-- Simple applications with minimal state
-- Rapid prototypes
-- Teams unfamiliar with TypeScript
 
 ## Key Principles in Practice
 
-1. **Design states first** - Define data models and variants before writing flows
-2. **Use descriptive signals** - Signal names should clearly indicate their intent  
-3. **Dispatch through `lock()` + `send()`** - and chain `.expect(...).done()`; reserve bare `dispatch()` for synchronous teardown / pre-lock bootstrap only
-4. **Let the reducer decide** - put validation and resolution in the pure flow; keep effect handlers thin appliers that read the `(state, snapshot)` arguments, never live off `this`
-5. **Leverage type safety** - Let TypeScript catch errors at compile time
-
-These principles create applications that are maintainable, debuggable, and predictable over time.
+1. **Design the states first:** their props and variants, then the signals each takes.
+2. **Name signals for their intent.**
+3. **Send through `lock()`,** and chain `.expect(...).done()`.
+4. **Let the reducer decide:** validation and resolution in pure reducers; handlers apply, read their `(state, snapshot, prev, key)` arguments rather than the target, and bring the world's data in as named results.
+5. **Release after the commit:** a commit delegate or a `DisposableBox` for what a step replaces, the step's `AbortSignal` for what a refused step made.
+6. **Let the types work:** declare payloads, props and the flow's definitions, and let the compiler check the rest.

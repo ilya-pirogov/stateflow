@@ -33,7 +33,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The package lives in packages/core; the README and the licence it ships with live at the repository root.
+      - name: Copy README and LICENSE into the package
+        run: cp README.md LICENSE packages/core/
+
       - name: Publish
-        run: npm publish --provenance --access public
+        run: npm publish --workspace @state-flow/core --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

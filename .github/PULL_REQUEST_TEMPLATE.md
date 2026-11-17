@@ -20,4 +20,4 @@
 - [ ] `npm test` passes and I added tests for new behavior / bug fixes
 - [ ] `npm run build` succeeds with no type errors
 - [ ] I updated the docs under `docs/src/app/docs/` if I changed public behavior
-- [ ] If I changed an export in `src/index.ts`, I called it out above
+- [ ] If I changed an export in `packages/core/src/index.ts`, I called it out above

@@ -1,10 +1,13 @@
 # dependencies
-/node_modules
+node_modules
 
 # build output
-/dist
-/coverage
+/packages/*/dist
+/packages/*/coverage
 *.tsbuildinfo
+
+# the modules the docs check writes from the docs' code blocks
+/.docs-examples
 
 # logs
 npm-debug.log*

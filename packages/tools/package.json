@@ -1,0 +1,16 @@
+{
+  "name": "@state-flow/tools",
+  "private": true,
+  "exports": "./src/index.ts",
+  "peerDependencies": {
+    "@state-flow/core": "^2.0.0",
+    "typescript": ">=5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.21"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

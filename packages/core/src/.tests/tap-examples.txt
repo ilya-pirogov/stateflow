@@ -1,0 +1,81 @@
+#1 dispatched s1 next{allow=F incr=T}
+#1 ended s1 next{allow=F incr=T}: Ignored: nothing to do; first does not allow it yet
+#1 dispatched s2 err{critical=T}
+#1 ended s2 err{critical=T}: Rejected: bad state
+#1 dispatched s3 next{allow=T incr=T}
+#1 ended s3 next{allow=T incr=T}: OK | changes first first.zero->first.zero
+#1 dispatched s4 next{allow=F incr=T}
+#1 handled enter c1 second second.good: OK
+#1 ended s4 next{allow=F incr=T}: OK | changes second second.initial->second.good
+#1 dispatched s5 err{critical=T}
+#1 ended s5 err{critical=T}: Rejected: still bad state
+#1 dispatched s6 err{critical=F}
+#1 ended s6 err{critical=F}: OK | changes second second.good->second.good
+#1 dispatched s7 next{allow=F incr=F}
+#1 ended s7 next{allow=F incr=F}: Rejected: we are not done yet! counter=1 < 2
+#1 dispatched s8 next{allow=F incr=T}
+#1 handled exit c2 second second.good: OK
+#1 ended s8 next{allow=F incr=T}: OK | changes second second.good->second.done
+#1 dispatched s9 next{allow=F incr=T}
+#1 ended s9 next{allow=F incr=T}: Ignored: nothing to do
+#2 dispatched s10 play{url=https://example.com/ok timeoutMs=U}
+#2 ended s10 play{url=https://example.com/ok timeoutMs=U} temp: InTransition | changes driver driver.idle->driver.activating
+#2 handled transition c3 driver driver.active: OK(loaded)
+#2 handled enter c4 driver driver.active: OK
+#2 ended s10 play{url=https://example.com/ok timeoutMs=U} final: OK | changes driver driver.activating->driver.active
+#2 dispatched s11 stop{}
+#2 handled exit c5 driver driver.active: OK
+#2 ended s11 stop{}: OK | changes driver driver.active->driver.idle
+#2 dispatched s12 play{url=https://example.com/missi… timeoutMs=U}
+#2 ended s12 play{url=https://example.com/missi… timeoutMs=U} temp: InTransition | changes driver driver.idle->driver.activating
+#2 handled transition c6 driver driver.active: Rejected: no manifest
+#2 ended s12 play{url=https://example.com/missi… timeoutMs=U} failed: Rejected: no manifest | changes driver driver.activating->driver.failed
+#2 dispatched s13 stop{}
+#2 ended s13 stop{}: OK | changes driver driver.failed->driver.idle
+#2 dispatched s14 play{url=https://example.com/slow timeoutMs=50}
+#2 ended s14 play{url=https://example.com/slow timeoutMs=50} temp: InTransition | changes driver driver.idle->driver.activating
+#2 ended s14 play{url=https://example.com/slow timeoutMs=50} failed: TransitionAborted: driver did not reach driver.active within 50 ms [SF035] Make the work answer sooner or raise timeoutMs; release what it acquired on abort. | changes driver driver.activating->driver.failed | unsettled c7 driver
+#2 handled transition c7 driver driver.active: TransitionAborted: driver did not reach driver.active within 50 ms [SF035] Make the work answer sooner or raise timeoutMs; release what it acquired on abort.
+#2 dispatched s15 stop{}
+#2 ended s15 stop{}: OK | changes driver driver.failed->driver.idle
+#2 dispatched s16 play{url=https://example.com/slow timeoutMs=U}
+#2 ended s16 play{url=https://example.com/slow timeoutMs=U} temp: InTransition | changes driver driver.idle->driver.activating
+#2 dispatched s17 stop{}
+#2 handled transition c8 driver driver.active: TransitionAborted: aborted by stop [SF040] Stop the work on abort and release what it acquired; expect Rejected where an abort may come.
+#2 ended s17 stop{} abort: OK | changes driver driver.activating->driver.idle
+#3 dispatched s18 open{}
+#3 ended s18 open{} temp: InTransition | changes media media.idle->media.opening
+#3 handled transition c9 media.transport transport.open: OK(opened)
+#3 ended s18 open{} final: OK | changes media media.opening->media.active, media.transport transport.closed->transport.open
+#3 dispatched s19 addProducer{key=cam track=Box(Object#1)}
+#3 ended s19 addProducer{key=cam track=Box(Object#1)} temp: InTransition | changes media media.active->media.active, media.producers[cam] (none)->producer.creating
+#3 handled transition c10 media.producers[cam] producer.active: OK(created)
+#3 ended s19 addProducer{key=cam track=Box(Object#1)} final: OK | changes media media.active->media.active, media.producers[cam] producer.creating->producer.active
+#3 dispatched s20 addProducer{key=mic track=Box(Object#3)}
+#3 ended s20 addProducer{key=mic track=Box(Object#3)} temp: InTransition | changes media media.active->media.active, media.producers[mic] (none)->producer.creating
+#3 handled transition c11 media.producers[mic] producer.active: OK(created)
+#3 ended s20 addProducer{key=mic track=Box(Object#3)} final: OK | changes media media.active->media.active, media.producers[mic] producer.creating->producer.active
+#3 dispatched s21 pause{key=cam}
+#3 handled update c12 media.producers[cam] producer.active: OK
+#3 ended s21 pause{key=cam}: OK | changes media media.active->media.active, media.producers[cam] producer.active->producer.active
+#3 dispatched s22 removeProducer{key=mic}
+#3 handled exit c13 media.producers[mic] producer.active: OK
+#3 ended s22 removeProducer{key=mic}: OK | changes media media.active->media.active, media.producers[mic] producer.active->(none)
+#3 dispatched s23 addProducer{key=slow track=Box(Object#5)}
+#3 ended s23 addProducer{key=slow track=Box(Object#5)} temp: InTransition | changes media media.active->media.active, media.producers[slow] (none)->producer.creating
+#3 dispatched s24 close{}
+#3 handled transition c14 media.producers[slow] producer.active: TransitionAborted: aborted by close [SF040] Stop the work on abort and release what it acquired; expect Rejected where an abort may come.
+#3 handled exit c15 media.producers[cam] producer.active: OK
+#3 handled exit c16 media.transport transport.open: OK
+#3 ended s24 close{} abort: OK | changes media media.active->media.idle, media.transport transport.open->transport.closed, media.producers[cam] producer.active->(none), media.producers[slow] producer.creating->(none)
+#4 dispatched s25 open{}
+#4 ended s25 open{} temp: InTransition | changes media media.idle->media.opening
+#4 handled transition c17 media.transport transport.open: OK(opened)
+#4 ended s25 open{} final: OK | changes media media.opening->media.active, media.transport transport.closed->transport.open
+#4 dispatched s26 addProducer{key=cam track=Box(Object#7)}
+#4 ended s26 addProducer{key=cam track=Box(Object#7)} temp: InTransition | changes media media.active->media.active, media.producers[cam] (none)->producer.creating
+#4 handled transition c18 media.producers[cam] producer.active: OK(created)
+#4 ended s26 addProducer{key=cam track=Box(Object#7)} final: OK | changes media media.active->media.active, media.producers[cam] producer.creating->producer.active
+#4 dispatched s27 pause{key=cam}
+#4 handled update c19 media.producers[cam] producer.active: OK
+#4 ended s27 pause{key=cam}: OK | changes media media.active->media.active, media.producers[cam] producer.active->producer.active

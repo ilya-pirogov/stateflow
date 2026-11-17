@@ -3,127 +3,201 @@ title: Boxing Live Resources
 description: Holding live resources in flat state with Box, and the reducer no-deref rule
 ---
 
-StateFlow state is *flat*: every prop is either deeply-frozen value data or an opaque `Box` handle — nothing mutable in between. Live resources that cannot be frozen (a `MediaStream`, a socket, a DOM element) live in a `Box`. {% .lead %}
+State is flat: every prop holds deep-frozen data, a nested state, or a `Box`, an opaque handle to a live resource such as a `MediaStream`, a socket or a DOM element. A `DisposableBox` is a Box whose resource the engine disposes once the committed states no longer hold it. {% .lead %}
 
 ## Flat state
 
-Every constructed state is **deep-frozen** — nested objects and arrays included, not just the
-top-level container. `sealProps` walks a state's props on construction and recursively freezes
-every plain object and array it finds, so no part of a committed state can be mutated after the
-fact:
+Building an instance freezes its props deeply, every plain object and array at any depth, so no part of a committed state changes afterwards. An observer, a subscriber or a view may keep a reference to any part of it.
 
 ```typescript
+const playerState = defineState<{
+  source: { url: string; bitrate: number };
+  chapters: Array<{ id: string; start: number }>;
+}>()
+  .name("player")
+  .variant("loaded", { initial: true })
+  .build();
+
 const state = playerState.loaded({
   source: { url: "https://example.com/video.mp4", bitrate: 4000 },
   chapters: [{ id: "intro", start: 0 }],
 });
 
 Object.isFrozen(state); // true
-Object.isFrozen(state.source); // true — nested object, frozen too
-Object.isFrozen(state.chapters); // true
-Object.isFrozen(state.chapters[0]); // true — array elements too
+Object.isFrozen(state.source); // true
+Object.isFrozen(state.chapters[0]); // true
 ```
 
-This is what makes state genuinely safe to hand out: an observer, a subscriber, or a UI layer
-can hold a reference to `state.source` and know it will never change under it.
+What the freeze leaves alone, and what it refuses:
 
-Deep-freezing only reaches plain objects and arrays. Two kinds of values are exempt by design:
+- A `Box` is frozen itself; the resource inside stays live.
+- A value that is frozen already, such as a `FrozenSet` or a `FrozenMap`, is trusted as immutable: the freeze only looks inside it for nested states.
+- An `Error`, a `RegExp`, a `URL` or a DOM event is frozen in place and kept.
+- Any other class instance, a raw `Set` or `Map` included, is refused: building the instance throws a `StateFlowError`.
+- A nested state goes directly in a prop, as an instance or an `Items`. One inside an array, a plain object, a `FrozenMap` or a `FrozenSet` is refused.
 
-- **`Box`** — an intentionally-unfrozen handle for a live resource. See below.
-- **`FrozenSet` / `FrozenMap`** — already-immutable collection types; they are branded and
-  skipped rather than walked, since walking a `Set`/`Map` structurally doesn't make sense.
+## Box
 
-A raw `Set`, `Map`, or live class instance placed directly in a prop is not what you want in
-flat state — use `FrozenSet`/`FrozenMap` for collections and `Box` for live resources. StateFlow
-dev-warns when it encounters an un-boxed, un-frozen class instance it can't safely freeze.
-
-## Box — an opaque owned handle
-
-`Box.of(resource)` wraps a live value so it can sit in state without being frozen (freezing a
-`MediaStream` or a WebSocket would break it). The box itself is frozen and branded; only its
-*interior* stays live.
+`Box.of(resource)` wraps a live value so that state can hold it unfrozen. `deref()` returns it:
 
 ```typescript
-import { Box } from "@state-flow/core";
-
 const camera = Box.of(mediaStream);
+
+camera.deref().getTracks().forEach((track) => track.stop());
 ```
 
-Read the wrapped value with `deref()`:
+`deref()` works everywhere except in reducer code: in a signal reducer, a result reducer or the key function of a keyed `Items` it throws a `StateFlowError` (see [The reducer borrow rule](#the-reducer-borrow-rule)). A reducer may still build a Box and place it in the state it returns.
+
+`Box.of` makes a new wrapper on every call, so boxes compare with `equals`, which compares the wrapped values:
 
 ```typescript
-const stream = camera.deref(); // returns the live MediaStream
-stream.getTracks().forEach((t) => t.stop());
+camera.equals(Box.of(mediaStream)); // true
+camera === Box.of(mediaStream); // false
 ```
 
-`deref()` is legal from an enter/exit/update handler or an observer — anywhere side effects are
-allowed. It **throws a `StateFlowError` inside a reducer**:
+Each box has an `id` (`"Box#3"`) and a `displayName`: `opts.displayName`, else the value's `constructor.displayName`, else its `constructor.name`, else `"Box"`. Its string form, in log entries and in `serializeDebug`, is `Box(MediaStream#3)`: it never prints the resource. `isBox(value)` tells a Box from any other value.
+
+## DisposableBox
+
+`DisposableBox.of(value)` boxes a value that has `Symbol.dispose` or `Symbol.asyncDispose`. It is a Box in every other way: a reducer may place it, `deref()` follows the same rule, and `isBox` is true. The engine disposes the value:
+
+- **After every step**, it disposes each box the step carried that no node of the committed states holds after it: those of the instances the step replaced or planned, and those of the named results its handlers returned, as the result's data or in its data's props. After a commit this runs once the step's commit delegates and commit handlers ran, so they still see the resource open. A refused step's boxes go with those of the step into failed after it, once that step's commit delegates and commit handlers ran, or at once when it changes nothing: a box that next and failed both hold stays, since the failed commits it.
+- **When a declared transition does not reach its next**, it disposes the boxes of that next and of the work's results that no node holds; the transition handler adds no listener for them (see [World values in props](#world-values-in-props)).
+- **At `disposeFlow`**, it disposes every box the final states hold.
+
+It calls `Symbol.dispose`, or else `Symbol.asyncDispose` without awaiting it, once per value; a throw or a rejection goes to `console.error`. The switch `setHandlersDisabled` does not stop this: the disposal is no handler. A box a reducer placed, from a signal's payload say, is disposed too when its step is refused and the failed does not hold it; a dispatch that its reducers or the plan refuse runs no step, and the box stays the caller's.
+
+A handler that replaces a resource therefore leaves both releases to the engine. Here the update handler opens a connection to the new url: the old connection is disposed once the step commits, and the new one when the step does not commit:
 
 ```typescript
-defineFlow(cameraState.active, {
-  stop: (state) => {
-    state.stream.deref(); // throws StateFlowError — reducers are pure
+interface Connection extends Disposable {
+  send(data: string): void;
+}
+
+function parseConnected(data: unknown): { conn: DisposableBox<Connection> } {
+  const conn = (data as { conn?: unknown } | null)?.conn;
+  if (!(conn instanceof DisposableBox)) {
+    throw new TypeError("connected takes the connection in a DisposableBox");
+  }
+  return { conn };
+}
+
+const linkSignals = {
+  connect: defineSignal<{ url: string }>("connect"),
+  drop: defineSignal("drop"),
+};
+
+const link = defineState<{ url: string; conn: DisposableBox<Connection> | null }>()
+  .name("link")
+  .signals(linkSignals)
+  .variant("down", { initial: true })
+  .variant("up", { results: { connected: parseConnected } })
+  .build();
+
+defineFlow(link.down, { connect: (s, { url }) => link.up({ url, conn: null }) });
+defineFlow(
+  link.up,
+  {
+    connect: (s, { url }) => ({ ...s, url }),
+    // Leaving up drops the connection: the engine disposes it once this step commits.
+    drop: (s) => link.down({ ...s, conn: null }),
   },
+  { connected: (s, { conn }) => ({ ...s, conn }) },
+);
+
+const app = { link: { url: "", conn: null } };
+
+applyFlow(app, [link], (sm) => {
+  sm.addEnterHandler(link.up, (s) =>
+    link.up.results.connected({ conn: DisposableBox.of(openConnection(s.url)) }),
+  );
+  sm.addUpdateHandler(link.up, (s) =>
+    link.up.results.connected({ conn: DisposableBox.of(openConnection(s.url)) }),
+  );
 });
 ```
 
-A reducer may still *place* a `Box` in the next state — construction and re-wrapping are fine,
-only reading the interior is forbidden. See [The reducer borrow rule](#the-reducer-borrow-rule)
-below.
+The states hold a box when any node holds it in an own prop, top-level or nested: a box moved to another node, into a nested state or to another key of an `Items` stays open, and so does a value wrapped anew, since two boxes of one value are one box (`equals`). The engine reads each prop's value without calling a getter, and looks neither under a symbol key nor into an array or an object inside a prop: a box there is neither checked nor disposed, so a DisposableBox goes directly in a prop.
 
-Compare boxes with `equals`, never `===`:
+Before any handler runs, the plan refuses a dispatch, with an Error that names the places, when one set of states it may commit, taken whole (next, a failed, a declared transition's temp, its next or its failed end):
+
+- holds one box in two places;
+- holds a box the engine disposed already;
+- for a transition's next or failed end, holds a box the committed states hold and the temp drops: the temp's commit would dispose it.
+
+A step other than a step into failed is refused the same way before its commit, with an Error that names the places, when the named results of its handlers, a transition's work's at its end, fold in and other states take them, and that leaves one box in two places or places a disposed one: two states' result reducers that store one box from one named result, say. A transition's end is checked so even with nothing to fold, since its next stands on the temp as it committed: a box the temp step's fold dropped, which the temp's commit disposed, may stand in next again.
+
+## World values in props
+
+A value the world gives, such as a socket, lives in a prop typed `Box<T> | null` (or `DisposableBox<T> | null`) whose default is `null`. The reducer that declares the entry builds the instance with the default; the handler that gets the value returns it as a named result of the variant it enters; the variant's result reducer puts it into props.
 
 ```typescript
-camera.equals(otherBox); // reference-identity on the wrapped value
-camera === Box.of(mediaStream); // false — Box.of always mints a new wrapper
+function parseOpened(data: unknown): { wire: DisposableBox<Connection> } {
+  const wire = (data as { wire?: unknown } | null)?.wire;
+  if (!(wire instanceof DisposableBox)) {
+    throw new TypeError("opened takes the connection in a DisposableBox");
+  }
+  return { wire };
+}
+
+const transport = defineState<{ wire: DisposableBox<Connection> | null }>()
+  .name("transport")
+  .signals({ open: defineSignal("open"), close: defineSignal("close") })
+  .variant("closed", { initial: true })
+  .variant("opening", { transitional: true })
+  .variant("open", { async: true, results: { opened: parseOpened } })
+  .build();
+
+// The reducer builds next with the default...
+defineFlow(transport.closed, {
+  open: (t) => StateResult.transition(transport.open({ wire: null }), transport.opening(t), transport.closed(t)),
+});
+// ...and the result reducer fills it. Leaving open drops the connection, which the engine disposes after the commit.
+defineFlow(transport.open, { close: () => transport.closed({ wire: null }) }, { opened: (t, { wire }) => ({ ...t, wire }) });
+
+const connection = { transport: { wire: null } };
+
+applyFlow(connection, [transport], (sm) => {
+  sm.addTransitionHandler(transport.open, async (next, snapshot, prev, key, signal) => {
+    const wire = await connect({ signal });
+    // In a DisposableBox the connection is the engine's: it disposes it at every end that does not commit it, also
+    // when this result settles after the signal aborted.
+    return transport.open.results.opened({ wire: DisposableBox.of(wire) });
+  });
+});
 ```
 
-Each box has a stable `id` (`"Box#3"`) and a `displayName` resolved from
-`opts.displayName` → `value.constructor.displayName` → `value.constructor.name` → `"Box"`.
-Boxes serialize (in logs, template strings, `serializeValue`) as `Box(<displayName>#<n>)`, e.g.
-`Box(MediaStream#3)` — never dumping the live resource's contents.
+Once `open` commits, the step that leaves `open` disposes the connection. With a plain `Box`, the work releases the connection itself on every abort of its signal, and an exit handler of `open` releases it: at once, before the commit, so also in a step that a later handler refuses, and once more when the failed step after that one leaves `open` too.
 
 ## FrozenSet and FrozenMap
 
-Use `FrozenSet` / `FrozenMap` for set/map-shaped props instead of a raw `Set`/`Map`. They extend
-the native classes (so `has`/`get`/`size`/iteration behave normally) but throw on any mutator:
+`FrozenSet` and `FrozenMap` extend the native classes, so `has`, `get`, `size` and iteration work as usual, and every mutator throws a `StateFlowError`:
 
 ```typescript
-import { FrozenSet, FrozenMap } from "@state-flow/core";
+const device = defineState<{ capacities: FrozenSet<string>; limits: FrozenMap<string, number> }>()
+  .name("device")
+  .variant("ready", { initial: true })
+  .build();
 
-const state = deviceState.ready({
+const ready = device.ready({
   capacities: new FrozenSet(["audio", "video"]),
   limits: new FrozenMap([["bitrate", 4000]]),
 });
 
-state.capacities.has("audio"); // true
-state.capacities.add("screen"); // throws StateFlowError
-state.limits.get("bitrate"); // 4000
-state.limits.set("bitrate", 8000); // throws StateFlowError
+ready.capacities.has("audio"); // true
+ready.limits.get("bitrate"); // 4000
+// ready.capacities.add("screen") and ready.limits.set("bitrate", 8000) throw
 ```
 
-`FrozenSet` additionally exposes `intersection` / `symmetricDifference`, which return plain,
-mutable `Set` instances for further manipulation outside of state.
+`FrozenSet` also has `intersection` and `symmetricDifference`, which return plain, mutable `Set`s.
 
 ## The reducer borrow rule
 
-Reducers (`defineFlow` handlers) must be pure: given the same state and signal, they always
-produce the same result, with no side effects. Two operations that would break that guarantee
-are blocked at runtime, regardless of `try`/`catch`:
+Reducers are pure: the same state and signal give the same answer, and nothing else happens. Two calls would break that, and both throw a `StateFlowError` inside reducer code (signal reducers, result reducers, the key functions of keyed `Items`):
 
-- **`Box.deref()` inside a reducer throws.** Reading a live resource is a side effect — the
-  resource could change between calls, and a reducer's job is to compute a *value*, not to
-  react to the outside world. A reducer may still construct or forward a `Box` (`Box.of(x)`, or
-  simply place an existing `Box` in the returned state) — it just cannot look inside one.
-- **Dispatching from inside a reducer throws.** A reducer that dispatches would recursively
-  re-enter the flow it's currently computing a transition for — `dispatch`/`lock`/`send` all
-  throw a `StateFlowError` when called synchronously from within a reducer.
+- **`Box.deref()`.** A live resource can change between two calls, so reading it is not a pure computation. Building a Box and placing one in the next state are allowed.
+- **Dispatching.** `dispatch`, a lock's `send` and `disposeFlow` would re-enter the flow whose answer the reducer is computing. On a disposed flow a send answers `Rejected` instead, as it dispatches nothing (see [disposeFlow](/docs/api-reference#dispose-flow)).
 
-Both rules are enforced by the same mechanism: StateFlow tracks "currently running a reducer"
-as a module-private flag around the single call site where reducers execute
-(`handleSignal`), so the check works regardless of how deep the call stack is — there's no way
-to launder a `deref()` or a `dispatch()` through a helper function and have it go unnoticed.
+The engine marks the time a reducer runs, so a call through a helper function throws too. A throw that leaves the reducer is its Error result, and nothing commits.
 
-If you need the live value to drive a transition, read it in an `applyFlow` enter/update
-handler (or an observer/subscriber) and pass the *result* — not the live resource — into the
-signal that triggers the reducer.
+When a decision needs a live value, a handler or an observer reads it and passes on the result, not the resource: as a named result's data, or in a signal it sends once its own dispatch has returned (a synchronous dispatch to its own target throws).
