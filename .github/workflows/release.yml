@@ -7,12 +7,18 @@ on:
 
 permissions:
   contents: read
-  id-token: write # required for npm provenance
+  id-token: write # required for trusted publishing and npm provenance
 
 jobs:
   publish:
-    name: Publish to npm
+    # A tag publishes both packages, whose manifests carry the same version. Each has its own job: a version cannot be
+    # published twice, so a job that failed is rerun alone.
+    name: Publish ${{ matrix.package }} to npm
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, tools]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,11 +40,15 @@ jobs:
       - name: Build
         run: npm run build
 
-      # The package lives in packages/core; the README and the licence it ships with live at the repository root.
-      - name: Copy README and LICENSE into the package
-        run: cp README.md LICENSE packages/core/
+      # The packages live in packages/; the licence they ship with lives at the repository root, and so does the README
+      # the library ships with.
+      - name: Copy LICENSE into the package
+        run: cp LICENSE packages/${{ matrix.package }}/
 
+      - name: Copy README into the library
+        if: matrix.package == 'core'
+        run: cp README.md packages/core/
+
+      # npm takes the workflow's identity (trusted publishing): no token is stored, and the provenance is generated.
       - name: Publish
-        run: npm publish --workspace @state-flow/core --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace @state-flow/${{ matrix.package }} --access public
