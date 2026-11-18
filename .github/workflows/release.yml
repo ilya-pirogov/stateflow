@@ -20,7 +20,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # The tools' tests, which run before the publish, need Node 24 (see ci.yml).
+          node-version: 24
           registry-url: "https://registry.npmjs.org"
           cache: npm
 

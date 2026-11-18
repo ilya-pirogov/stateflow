@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-11-17
 
 Every effect now belongs to a state: pure reducers decide, and handlers apply. A handler never
 chooses the next state: it succeeds or refuses, the reducer has already named where the state goes in
@@ -548,7 +548,7 @@ defaults.
   `stateVar`, and the public symbols `PARSER`, `SIGNALS`, `STRING_REPR`,
   `VARIANT`.
 
-[2.0.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.2.0...HEAD
+[2.0.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.0...v1.0.1
