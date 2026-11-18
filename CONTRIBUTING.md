@@ -19,7 +19,7 @@ what we expect from contributions.
 
 - `packages/core/` — the library, published as `@state-flow/core`. Source in `packages/core/src/`; public exports are defined in `packages/core/src/index.ts`.
 - `packages/core/src/.tests/` — the test suite (vitest, files named `*.spec.ts`).
-- `packages/tools/` — development-only tools for testing code built on the library (`@state-flow/tools`).
+- `packages/tools/` — development-only tools for testing code built on the library, published as `@state-flow/tools`.
 - `docs/` — the documentation website (a separate Next.js app with its own dependencies).
 
 ## Development workflow

@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `@state-flow/tools` is published to npm at the library's version: the development tools for code built on the
+  library, shipped as TypeScript source. The release workflow publishes both packages, each in its own job.
+
 ## [2.0.0] - 2026-11-17
 
 Every effect now belongs to a state: pure reducers decide, and handlers apply. A handler never
@@ -548,6 +555,7 @@ defaults.
   `stateVar`, and the public symbols `PARSER`, `SIGNALS`, `STRING_REPR`,
   `VARIANT`.
 
+[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.1...v1.1.0

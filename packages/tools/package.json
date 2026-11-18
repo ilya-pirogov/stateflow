@@ -1,7 +1,27 @@
 {
   "name": "@state-flow/tools",
-  "private": true,
+  "version": "2.0.0",
+  "description": "Development-only tools for testing code built on @state-flow/core. Never a production dependency.",
+  "license": "MIT",
+  "author": "Ilya Pirogov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ilya-pirogov/stateflow.git",
+    "directory": "packages/tools"
+  },
+  "homepage": "https://stateflow.dev",
+  "bugs": {
+    "url": "https://github.com/ilya-pirogov/stateflow/issues"
+  },
   "exports": "./src/index.ts",
+  "files": [
+    "src",
+    "docs",
+    "!src/.tests"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "@state-flow/core": "^2.0.0",
     "typescript": ">=5"
