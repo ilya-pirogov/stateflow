@@ -44,7 +44,7 @@ pnpm add @state-flow/core
 ```
 
 **Requirements.** The types need **TypeScript 5.6+**: the handler adders use `NoInfer` (5.4), and `Items` returns
-`MapIterator` (5.6). The package is built for ES2022 and polyfills `Symbol.dispose` and `Symbol.asyncDispose`, so it
+`MapIterator` (5.6). The package is built for ES2020 and polyfills `Symbol.dispose` and `Symbol.asyncDispose`, so it
 runs on Node.js 18+ and current browsers. The examples use `await using`, which needs the `ESNext.Disposable` lib;
 disposing by hand works as well (`observer[Symbol.dispose]()`).
 

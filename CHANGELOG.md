@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-18
+
+### Changed
+
+- The published bundle targets ES2020 again, as 1.2 did (2.0.0: ES2022). An application whose build does not
+  transpile its dependencies ships the bundle as it is, and browsers without native private class members and static
+  blocks, Safari before 16.4 among them, could not parse the ES2022 one. Private class fields go through helpers
+  again.
+
 ### Added
 
 - `@state-flow/tools` is published to npm at the library's version: the development tools for code built on the
@@ -555,7 +564,8 @@ defaults.
   `stateVar`, and the public symbols `PARSER`, `SIGNALS`, `STRING_REPR`,
   `VARIANT`.
 
-[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.0.1...v1.1.0

@@ -9,7 +9,7 @@ Install the package, set up TypeScript, and run a first flow. {% .lead %}
 
 {% callout type="note" %}
 StateFlow's types need **TypeScript 5.6+**: the handler adders use `NoInfer` (5.4), and `Items` returns
-`MapIterator` (5.6). The package is built for ES2022 and polyfills `Symbol.dispose` and `Symbol.asyncDispose`, so it
+`MapIterator` (5.6). The package is built for ES2020 and polyfills `Symbol.dispose` and `Symbol.asyncDispose`, so it
 runs on Node.js 18+ and current browsers. Its only runtime dependency is `events`.
 {% /callout %}
 
@@ -50,8 +50,9 @@ A `tsconfig.json` for an application that uses StateFlow:
 - **`strict: true`**: the library's sources and the examples on these pages compile under it.
 - **`ESNext.Disposable`** provides `Disposable`, `AsyncDisposable` and `Symbol.dispose`, which StateFlow's types and
   the `using` / `await using` syntax of the examples need.
-- **`ES2022`** as the target matches the published bundle; a lower target needs a bundler that downlevels
-  dependencies too. `ESNext` modules allow the top-level `await` of the minimal example below.
+- **`ES2022`** as the target is this example's choice. The published bundle is ES2020, so an application may target
+  anything from ES2020 up without a bundler that downlevels dependencies. `ESNext` modules allow the top-level `await`
+  of the minimal example below.
 - **`DOM`** is for browser applications only.
 
 ## Framework Integration
@@ -169,7 +170,7 @@ export class PlaybackService implements OnDestroy {
 ## Bundlers
 
 The package ships an ES module (`dist/index.mjs`), a CommonJS build (`dist/index.js`) and type declarations, all
-for ES2022. A bundler that targets ES2022 or later takes it as it is.
+for ES2020. A bundler that targets ES2020 or later takes it as it is.
 
 ## First Steps Checklist
 
