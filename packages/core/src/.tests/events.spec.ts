@@ -51,7 +51,7 @@ describe("events and watches", () => {
     return { target, entries };
   }
 
-  it("an event fires on a later turn after the commit its predicate accepts, with its payload; prev is the previous commit's states, the initial ones first; the entry records the decision under observers with the changed states", async () => {
+  it("an event fires on a later turn after the commit its predicate accepts, with its payload; prev is the previous commit's states, the initial ones first; the entry records an event that fires under observers with the changed states, and nothing for one that does not", async () => {
     const { target, entries } = flow((sm) => {
       sm.defineEvent(
         "grew",
@@ -69,7 +69,7 @@ describe("events and watches", () => {
     dispatch(target, signals.go());
     await tick();
     expect(target.emitted).toEqual([["grew", 1]]);
-    expect(entries[1]?.observers).toEqual([{ observerName: "event:grew", stateName: "cnt", needObserve: false }]);
+    expect(entries[1]?.observers).toEqual([]);
   });
 
   it("an event on a variant's entry needs no payload: the emit carries the name alone", async () => {

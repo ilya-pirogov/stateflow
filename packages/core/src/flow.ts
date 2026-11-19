@@ -2502,8 +2502,8 @@ function applyState(target: object, meta: StateFlowMeta, changes: StateChange[],
 
 /**
  * Tells the flow's events and watches of a commit: each decides on the committed states and the states it saw at the
- * commit before, and the entry records its decision under observers, named by the top-level states the commit changed.
- * One that fires acts on a later turn of the flow's timers, in registration order. A throw from a predicate is the
+ * commit before. The entry records one that fires under observers, named by the top-level states the commit changed,
+ * and it acts on a later turn of the flow's timers, in registration order. A throw from a predicate is the
  * entry's observer error, a throw from an act goes to console.error: neither can break the commit.
  */
 function notifyWatchers(target: object, meta: StateFlowMeta, changes: StateChange[], rc: ResultCollector): void {
@@ -2520,8 +2520,8 @@ function notifyWatchers(target: object, meta: StateFlowMeta, changes: StateChang
       console.error(`[SF/${meta.name}] the predicate of ${watcher.name} threw:`, err);
       continue;
     }
-    rc.logObserver(changed, watcher.name, fires);
     if (fires) {
+      rc.logObserver(changed, watcher.name, true);
       meta.deliveries += 1;
       meta.timers.setTimeout(() => {
         meta.deliveries -= 1;
@@ -2539,7 +2539,7 @@ function notifyWatchers(target: object, meta: StateFlowMeta, changes: StateChang
 /**
  * Watches the flow: after every commit `changed(cur, prev)` runs on the committed states and on the states as of the
  * commit before (the states of now the first time), and when it returns true `callback(cur, prev)` runs on a later
- * turn of the flow's timers. The commit's entry records each decision under observers as `watch:<callback name>`.
+ * turn of the flow's timers. The commit's entry records a watch that fires under observers as `watch:<callback name>`.
  * Unlike an event (see StateManager.defineEvent) a watch is attached and released at any time: dispose the returned
  * Disposer to stop it. The callback runs only while the watch is registered, so once the Disposer or disposeFlow
  * removed it, a callback that an earlier commit set does not run. A throw from `changed` is the entry's observer
@@ -2841,8 +2841,8 @@ function subscribe<TState>(
       console.error(`[SF/${meta.name}] the compare of observer ${name} on ${String(stateVar)} threw:`, err);
       return;
     }
-    rc.logObserver(path, name, needObserve);
     if (needObserve) {
+      rc.logObserver(path, name, true);
       meta.deliveries += 1;
       meta.timers.setTimeout(() => {
         meta.deliveries -= 1;

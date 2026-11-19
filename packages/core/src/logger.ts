@@ -47,9 +47,10 @@ export interface StateFlowLogEntry {
     result: string;
   }>;
 
-  // An observer's result on a change of a node, named by its path as in stateChanges: whether its compare asked for its
-  // callback (true with no compare for a nested node that held no instance of its state before); when the compare
-  // threw, false, and `error` is the string form of the throw.
+  // The observers whose compare asked for their callback on a change of a node, named by its path as in stateChanges
+  // (with no compare for a nested node that held no instance of its state before): `needObserve` is true. One whose
+  // compare threw is listed too, with `needObserve` false and `error` the string form of the throw. An observer whose
+  // compare declined is not listed.
   observers: Array<{
     observerName: string;
     stateName: string;

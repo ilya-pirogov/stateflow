@@ -215,6 +215,26 @@ describe("dispatch guards", () => {
     expect(log).toHaveBeenCalledWith("\tobserved by seen() => threw Error: compare boom");
   });
 
+  it("an observer whose compare declines leaves no record in the step's entry", async () => {
+    const light = defineLight();
+    const entries: StateFlowLogEntry[] = [];
+    const target = { light: { n: 0 } };
+    applyFlow(target, [light], () => {}, { logHandlers: [(entry) => entries.push(entry)] });
+    using _observer = observe(
+      target,
+      [light.on],
+      function seen() {},
+      () => false,
+    );
+
+    dispatch(target, toggle());
+
+    expect(String(target.light)).toBe("light.on(n=1)");
+    await flush();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].observers).toEqual([]);
+  });
+
   it("a string form that throws while a plain step is logged leaves the dispatch: nothing commits, and the step's entry records the Error", async () => {
     const light = defineState<{ n: number }>()
       .name("light")

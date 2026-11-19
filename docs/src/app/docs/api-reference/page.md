@@ -587,8 +587,8 @@ interface StateManager<States> {
 
 After every commit `changed` runs on the committed states and on the states as of the commit before, the initial
 ones the first time. When it returns true, the event is emitted on a later turn of the flow's timers, with
-`payload(cur)` when given; the events of one commit fire in definition order. The commit's log entry records each
-decision under `observers`, as `event:<name>`. A throw from `changed` is that observer's error and emits nothing,
+`payload(cur)` when given; the events of one commit fire in definition order. The commit's log entry records an
+event that fires under `observers`, as `event:<name>`. A throw from `changed` is that observer's error and emits nothing,
 a throw from `payload` or from a listener goes to `console.error`, and nothing an event does can break the commit.
 Events keep running with handlers off.
 
@@ -860,7 +860,7 @@ function watch<T extends object>(
 
 After every commit `changed(cur, prev)` runs on the committed states and on the states as of the commit before
 (the states at `watch()` the first time); when it returns true, `callback(cur, prev)` runs on a later turn of the
-flow's timers. The entry records each decision under `observers` as `watch:<callback name>`. A throw from `changed`
+flow's timers. The entry records a watch that fires under `observers` as `watch:<callback name>`. A throw from `changed`
 is that observer's error, a throw from `callback` goes to `console.error`, and neither can break the commit. Unlike
 an [event](#events), a watch is attached and released at any time, and runs a callback instead of emitting. The
 callback runs only while the watch is registered: once it is disposed, or `disposeFlow` removed it, a callback that
@@ -1690,7 +1690,7 @@ Each step writes one log entry (`StateFlowLogEntry`) to the flow's log handlers,
 writes one too. A declared transition writes one entry per commit, marked `transition: "temp"`, `"final"` or
 `"failed"`; an accepted abort's entry carries `aborted`, the path of the node whose transition it aborted. A handler
 result's type is `enter`, `exit`, `update`, `commit` (a commit handler, or a commit delegate's throw) or
-`transition`. Observers, events and watches record their decisions under `observers`. Handler results, state
+`transition`. Observers, events and watches that fire, and those whose compare threw, are recorded under `observers`. Handler results, state
 changes and observers' results name a nested node by its path, as `media.producers[cam]`. See
 [State visibility](/docs/state-visibility#entry-structure) for the full structure.
 

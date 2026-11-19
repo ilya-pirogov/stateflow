@@ -1,6 +1,6 @@
 {
   "name": "@state-flow/tools",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Development-only tools for testing code built on @state-flow/core. Never a production dependency.",
   "license": "MIT",
   "author": "Ilya Pirogov",
