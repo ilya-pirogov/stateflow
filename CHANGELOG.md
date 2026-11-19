@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-11-19
+
 ### Changed
 
 - A log entry lists under `observers` only the observers, events and watches that fired in the step, and those whose
@@ -571,7 +573,8 @@ defaults.
   `stateVar`, and the public symbols `PARSER`, `SIGNALS`, `STRING_REPR`,
   `VARIANT`.
 
-[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/ilya-pirogov/stateflow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/ilya-pirogov/stateflow/compare/v1.1.0...v1.2.0
