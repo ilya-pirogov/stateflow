@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A log entry lists under `observers` only the observers, events and watches that fired in the step, and those whose
+  compare or predicate threw. One that was evaluated and declined is no longer listed: every event and watch is
+  evaluated at every commit, so a flow with many events wrote one record per event into every entry, and the console
+  handler printed each as `=> false`.
+
 ## [2.0.1] - 2026-11-18
 
 ### Changed

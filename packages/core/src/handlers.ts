@@ -191,7 +191,7 @@ export interface StateManager<TStates = any> {
    * Defines a public event of the flow, emitted through the target's own `emit(name, payload?)`. After every commit
    * `changed(cur, prev)` runs on the committed states and on the states as of the previous commit (the initial
    * instances the first time); when it returns true the event is emitted on a later turn of the flow's timers, with
-   * `payload(cur)` when given. Each evaluation is in the commit's entry under `observers`, named `event:<name>`,
+   * `payload(cur)` when given. An event that fires is in the commit's entry under `observers`, named `event:<name>`,
    * with `stateName` listing the top-level states the commit changed; a throw from `changed` is the entry's observer
    * error and emits nothing; a throw from `payload` or from a listener goes to console.error. Nothing an event does
    * can break the commit.
